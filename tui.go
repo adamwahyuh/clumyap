@@ -16,25 +16,81 @@ import (
 	"charm.land/lipgloss/v2"
 )
 
-const tuiHelp = `Type text and press Enter to hear it.
-  /voice [name]       switch voice (no name: list voices)
-  /speed N            speed 0.5-2.0
-  /lang en-us|en-gb   accent of the pronunciation
-  /model [name]       switch model (no name: list models)
-  /replay             play the last audio again
-  /stop               stop playback (or Esc)
-  /save [file]        save the last audio (.mp3/.wav, default: output-dir)
-  /default            keep the current voice, speed, lang and model as defaults
-  /help               this help
-  /exit               quit (or Ctrl+C)`
+// tuiCommands is the single source for /help, Tab completion and the suggestion menu.
+var tuiCommands = []struct{ name, args, desc string }{
+	{"voice", "[name]", "switch voice (no name: list voices)"},
+	{"speed", "N", "speed 0.5-2.0"},
+	{"lang", "en-us|en-gb", "accent of the pronunciation"},
+	{"model", "[name]", "switch model (no name: list models)"},
+	{"replay", "", "play the last audio again"},
+	{"stop", "", "stop playback (or Esc)"},
+	{"save", "[file]", "save the last audio (.mp3/.wav, default: output-dir)"},
+	{"default", "", "keep the current voice, speed, lang and model as defaults"},
+	{"help", "", "show commands"},
+	{"exit", "", "quit (or Ctrl+C)"},
+}
 
+// Mid-tone colors so text stays readable on both dark and light terminals.
 var (
-	accent = lipgloss.NewStyle().Foreground(lipgloss.Color("6"))
-	dim    = lipgloss.NewStyle().Faint(true)
-	red    = lipgloss.NewStyle().Foreground(lipgloss.Color("1"))
-	green  = lipgloss.NewStyle().Foreground(lipgloss.Color("2"))
-	box    = lipgloss.NewStyle().Border(lipgloss.RoundedBorder()).BorderForeground(lipgloss.Color("8")).Padding(0, 1)
+	cPurple = lipgloss.Color("#8B5CF6")
+	cPink   = lipgloss.Color("#EC4899")
+	cAmber  = lipgloss.Color("#D97706")
+	cCyan   = lipgloss.Color("#06B6D4")
+	cGreen  = lipgloss.Color("#16A34A")
+	cRed    = lipgloss.Color("#EF4444")
+	cGray   = lipgloss.Color("#6B7280")
+
+	accent = lipgloss.NewStyle().Foreground(cPurple).Bold(true)
+	dim    = lipgloss.NewStyle().Foreground(cGray)
+	red    = lipgloss.NewStyle().Foreground(cRed)
+	green  = lipgloss.NewStyle().Foreground(cGreen)
+	pink   = lipgloss.NewStyle().Foreground(cPink)
+	amber  = lipgloss.NewStyle().Foreground(cAmber)
+	cyan   = lipgloss.NewStyle().Foreground(cCyan)
+	box    = lipgloss.NewStyle().Border(lipgloss.RoundedBorder()).Padding(0, 1)
 )
+
+func banner() string {
+	word := "clumyap"
+	colors := lipgloss.Blend1D(len(word), cPurple, cPink, cAmber)
+	var b strings.Builder
+	for i, r := range word {
+		b.WriteString(lipgloss.NewStyle().Foreground(colors[i]).Bold(true).Render(string(r)))
+	}
+	return "♪ " + b.String() + dim.Render("  offline text-to-speech · ") + cyan.Render("/help") + dim.Render(" for commands · ") + cyan.Render("Tab") + dim.Render(" to complete")
+}
+
+func helpText() string {
+	var b strings.Builder
+	b.WriteString(dim.Render("Type text and press Enter to hear it.") + "\n")
+	for _, c := range tuiCommands {
+		left := "/" + c.name
+		if c.args != "" {
+			left += " " + c.args
+		}
+		b.WriteString("  " + cyan.Render(fmt.Sprintf("%-20s", left)) + dim.Render(c.desc) + "\n")
+	}
+	return strings.TrimSuffix(b.String(), "\n")
+}
+
+// suggestions are full input lines the textinput offers for prefix completion; desc feeds the menu.
+func suggestions() (lines []string, desc map[string]string) {
+	desc = map[string]string{}
+	add := func(line, d string) { lines = append(lines, line); desc[line] = d }
+	for _, c := range tuiCommands {
+		add("/"+c.name, c.desc)
+	}
+	groups := map[string]string{"af": "American female", "am": "American male", "bf": "British female", "bm": "British male"}
+	for _, v := range voices {
+		add("/voice "+v[3:], groups[v[:2]])
+	}
+	for _, m := range models {
+		add("/model "+m.name, m.size+" · "+m.note)
+	}
+	add("/lang en-us", "American pronunciation")
+	add("/lang en-gb", "British pronunciation")
+	return lines, desc
+}
 
 type (
 	loadedMsg struct {
@@ -64,6 +120,7 @@ type tui struct {
 	pct    string
 	last   []float32
 	player *exec.Cmd
+	desc   map[string]string
 }
 
 func runTUI(o options) error {
@@ -81,17 +138,26 @@ func runTUI(o options) error {
 func newTUI(o options) *tui {
 	o.voice = voices[voiceID(o.voice)]
 	in := textinput.New()
-	in.Placeholder = "type text to speak, or /help"
+	in.Prompt = "› "
+	in.Placeholder = "type text to speak, or / for commands"
+	st := in.Styles()
+	st.Focused.Prompt = accent
+	st.Focused.Placeholder = dim
+	st.Focused.Suggestion = dim
+	in.SetStyles(st)
+	lines, desc := suggestions()
+	in.ShowSuggestions = true
+	in.SetSuggestions(lines)
 	in.Focus()
-	return &tui{o: o, input: in, spin: spinner.New(spinner.WithSpinner(spinner.MiniDot), spinner.WithStyle(accent))}
+	return &tui{o: o, input: in, desc: desc, spin: spinner.New(spinner.WithSpinner(spinner.MiniDot), spinner.WithStyle(pink))}
 }
 
 func say(style lipgloss.Style, s string) tea.Cmd { return tea.Println(style.Render(s)) }
 func fail(err error) tea.Cmd                     { return say(red, "✗ "+err.Error()) }
+func done(s string) tea.Cmd                      { return tea.Println(green.Render("✓ ") + s) }
 
 func (m *tui) Init() tea.Cmd {
-	banner := tea.Println(accent.Bold(true).Render("clumyap") + dim.Render(" · offline text-to-speech · /help for commands"))
-	return tea.Batch(banner, m.load(m.o.model))
+	return tea.Batch(tea.Println(banner()), m.load(m.o.model))
 }
 
 func (m *tui) load(name string) tea.Cmd {
@@ -149,7 +215,7 @@ func (m *tui) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.eng.close()
 		}
 		m.eng, m.o.model = msg.eng, msg.eng.model.name
-		return m, say(dim, "✓ model "+m.o.model+" ready")
+		return m, done(dim.Render("model ") + green.Render(m.o.model) + dim.Render(" ready"))
 	case synthMsg:
 		m.busy = ""
 		if msg.err != nil {
@@ -157,7 +223,7 @@ func (m *tui) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		m.last = msg.samples
 		secs := float64(len(msg.samples)) / float64(m.eng.rate)
-		return m, tea.Batch(say(dim, fmt.Sprintf("✓ %.1fs audio · made in %.1fs", secs, msg.took.Seconds())), m.play())
+		return m, tea.Batch(done(amber.Render(fmt.Sprintf("%.1fs", secs))+dim.Render(" audio · made in ")+amber.Render(fmt.Sprintf("%.1fs", msg.took.Seconds()))), m.play())
 	case playDoneMsg:
 		if m.player == msg.cmd {
 			m.player = nil
@@ -175,7 +241,10 @@ func (m *tui) submit() tea.Cmd {
 		return nil
 	}
 	m.input.Reset()
-	echo := tea.Println(accent.Render("> ") + line)
+	echo := tea.Println(accent.Render("› ") + line)
+	if strings.HasPrefix(line, "/") {
+		echo = tea.Println(accent.Render("› ") + cyan.Render(line))
+	}
 	if strings.HasPrefix(line, "/") {
 		return tea.Sequence(echo, m.command(line))
 	}
@@ -204,7 +273,7 @@ func (m *tui) command(line string) tea.Cmd {
 	arg = strings.TrimSpace(arg)
 	switch name {
 	case "help":
-		return say(dim, tuiHelp)
+		return tea.Println(helpText())
 	case "exit", "quit":
 		return tea.Quit
 	case "stop":
@@ -240,7 +309,7 @@ func (m *tui) command(line string) tea.Cmd {
 			}
 			return m.load(val)
 		}
-		return say(dim, name+" → "+val)
+		return done(dim.Render(name+" → ") + pink.Render(val))
 	case "replay":
 		if m.last == nil {
 			return fail(errors.New("nothing to replay yet"))
@@ -264,13 +333,13 @@ func (m *tui) command(line string) tea.Cmd {
 		if err := writeFile(path, m.last, m.eng.rate); err != nil {
 			return fail(err)
 		}
-		return say(green, "✓ saved "+path)
+		return done(dim.Render("saved ") + cyan.Render(path))
 	case "default":
 		sets := []string{"voice=" + m.o.voice, "speed=" + strconv.FormatFloat(m.o.speed, 'f', -1, 64), "lang=" + m.o.lang, "model=" + m.o.model}
 		if err := updateConfig(m.o.cfg, sets, nil); err != nil {
 			return fail(err)
 		}
-		return say(green, "✓ saved as defaults")
+		return done(dim.Render("saved as defaults"))
 	}
 	return fail(fmt.Errorf("unknown command /%s, see /help", name))
 }
@@ -310,14 +379,52 @@ func (m *tui) stop() {
 func (m *tui) View() tea.View {
 	var b strings.Builder
 	if m.busy != "" {
-		b.WriteString(m.spin.View() + " " + dim.Render(m.busy+m.pct) + "\n")
+		b.WriteString(m.spin.View() + " " + pink.Render(m.busy) + amber.Render(m.pct) + "\n")
 	}
-	b.WriteString(box.Render(m.input.View()) + "\n")
+	border := cPurple
+	if m.busy != "" {
+		border = cAmber
+	}
+	b.WriteString(box.BorderForeground(border).Render(m.input.View()) + "\n")
+	if menu := m.menu(); menu != "" {
+		b.WriteString(menu + "\n")
+	}
 	mod, _ := findModel(m.o.model)
-	status := fmt.Sprintf(" %s · speed %s · %s · %s model", m.o.voice, strconv.FormatFloat(m.o.speed, 'f', -1, 64), m.o.lang, mod.short)
+	sep := dim.Render(" · ")
+	b.WriteString(" " + pink.Render("♪ "+m.o.voice) + sep + amber.Render(strconv.FormatFloat(m.o.speed, 'f', -1, 64)+"x") +
+		sep + cyan.Render(m.o.lang) + sep + green.Render(mod.short+" model"))
 	if m.player != nil {
-		status += " · ▶ esc to stop"
+		b.WriteString(sep + pink.Render("▶ playing") + dim.Render(" esc to stop"))
 	}
-	b.WriteString(dim.Render(status))
 	return tea.NewView(b.String())
+}
+
+// menu lists the completions for a "/..." input, highlighting the one Tab will accept.
+func (m *tui) menu() string {
+	val := m.input.Value()
+	matches := m.input.MatchedSuggestions()
+	if !strings.HasPrefix(val, "/") || len(matches) == 0 || (len(matches) == 1 && matches[0] == val) {
+		return ""
+	}
+	const rows = 6
+	cur := m.input.CurrentSuggestionIndex()
+	start := min(max(0, cur-rows+1), max(0, len(matches)-rows))
+	end := min(len(matches), start+rows)
+	width := 0
+	for _, s := range matches[start:end] {
+		width = max(width, len(s)+2)
+	}
+	var b strings.Builder
+	for i := start; i < end; i++ {
+		line := fmt.Sprintf("%-*s", width, matches[i])
+		if i == cur {
+			b.WriteString(accent.Render("  › "+line) + dim.Render(m.desc[matches[i]]) + "\n")
+		} else {
+			b.WriteString(dim.Render("    "+line+m.desc[matches[i]]) + "\n")
+		}
+	}
+	if more := len(matches) - rows; more > 0 {
+		b.WriteString(dim.Render(fmt.Sprintf("    … %d more, ↑/↓ to browse", more)) + "\n")
+	}
+	return strings.TrimSuffix(b.String(), "\n")
 }

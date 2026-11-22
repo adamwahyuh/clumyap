@@ -3,6 +3,7 @@ package main
 import (
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 )
 
@@ -35,6 +36,25 @@ func TestTUICommands(t *testing.T) {
 	cfg, _ := loadConfig()
 	if cfg["voice"] != "bm_george" || cfg["speed"] != "1.25" || cfg["lang"] != "en-gb" {
 		t.Fatalf("/default not saved: %v", cfg)
+	}
+
+	// Completion: "/mo" offers /model first; "/voice BE" (any case) offers bella; plain text gets no menu.
+	m.input.SetValue("/mo")
+	if got := m.input.CurrentSuggestion(); got != "/model" || !strings.Contains(m.menu(), "/model kokoro-int8-multi-lang-v1_0") {
+		t.Errorf("/mo: suggestion %q, menu:\n%s", got, m.menu())
+	}
+	m.input.SetValue("/voice BE")
+	if got := m.input.CurrentSuggestion(); got != "/voice bella" {
+		t.Errorf("/voice BE: suggestion %q", got)
+	}
+	m.input.SetValue("hello")
+	if m.menu() != "" {
+		t.Error("plain text must not show a menu")
+	}
+	for _, c := range tuiCommands {
+		if !strings.Contains(helpText(), "/"+c.name) {
+			t.Errorf("help is missing /%s", c.name)
+		}
 	}
 
 	// /save needs audio; fake some and an engine rate without loading a model.
