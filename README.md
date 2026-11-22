@@ -40,8 +40,17 @@ clumyap --help                                 # every flag
 
 On macOS, `--play` and the interactive session play audio with the built-in `afplay`.
 
-## Licenses of the parts it uses
+## Credits
 
-- Kokoro model: Apache 2.0
-- sherpa-onnx: Apache 2.0
-- espeak-ng (pronounces words missing from Kokoro's lexicon): GPL-3.0
+Made by Adam Wahyu Hariyadi. `/info` inside `clumyap start` shows the same list.
+
+| Part | By | License | Used for |
+|---|---|---|---|
+| Kokoro-82M | hexgrad | Apache-2.0 | the voices |
+| sherpa-onnx | k2-fsa | Apache-2.0 | runs the voice model |
+| ONNX Runtime | Microsoft | MIT | neural network engine |
+| misaki | hexgrad | Apache-2.0 | espeak-to-Kokoro sound rules |
+| espeak-ng | espeak-ng team | GPL-3.0 | words missing from Kokoro's lexicon |
+| piper-phonemize | rhasspy | MIT | connects espeak-ng |
+| shine-mp3 | braheezy | LGPL-2.0 | MP3 encoder |
+| Bubble Tea, Bubbles, Lip Gloss | Charm | MIT | terminal UI |

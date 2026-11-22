@@ -31,6 +31,7 @@ var tuiCommands = []struct{ name, args, desc string }{
 	{"save", "[file]", "save the last audio (.mp3/.wav, default: output-dir)"},
 	{"config", "", "show saved settings (colored = saved, rest = built-in default)"},
 	{"default", "", "keep the current voice, speed, pauses, lang and model as defaults"},
+	{"info", "", "about clumyap: version, maker and credits"},
 	{"help", "", "show commands"},
 	{"exit", "", "quit (or Ctrl+C)"},
 }
@@ -399,6 +400,8 @@ func (m *tui) command(line string) tea.Cmd {
 	switch name {
 	case "help":
 		return tea.Println(helpText())
+	case "info":
+		return tea.Println(infoText())
 	case "exit", "quit":
 		return tea.Quit
 	case "stop":

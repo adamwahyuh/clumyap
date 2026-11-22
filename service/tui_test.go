@@ -32,7 +32,7 @@ func TestTUICommands(t *testing.T) {
 	if m.o.voice != "bm_george" || m.o.speed != 1.25 {
 		t.Fatalf("invalid values must not change settings: %+v", m.o)
 	}
-	for _, c := range []string{"/save", "/replay", "/bogus", "/help", "/voice", "/model", "/speed", "/config"} {
+	for _, c := range []string{"/save", "/replay", "/bogus", "/help", "/voice", "/model", "/speed", "/config", "/info"} {
 		if m.command(c) == nil {
 			t.Errorf("%s: want a message", c)
 		}
@@ -295,5 +295,19 @@ func TestDirPicker(t *testing.T) {
 	m2.command("/default")
 	if _, ok := m2.o.cfg["output-dir"]; ok {
 		t.Fatal("/default must not store the start folder when /dir was not used")
+	}
+}
+
+func TestInfo(t *testing.T) {
+	txt := infoText()
+	for _, want := range []string{"v" + version(), appAuthor, appEmail, "Kokoro-82M", "hexgrad", "Apache-2.0", "espeak-ng", "GPL-3.0", "shine-mp3", "LGPL-2.0"} {
+		if !strings.Contains(txt, want) {
+			t.Errorf("/info is missing %q", want)
+		}
+	}
+	for _, line := range strings.Split(regexp.MustCompile(`\x1b\[[0-9;:]*m`).ReplaceAllString(txt, ""), "\n") {
+		if w := lipgloss.Width(line); w > 80 {
+			t.Errorf("/info line is %d wide, wraps in an 80-column terminal: %q", w, line)
+		}
 	}
 }
