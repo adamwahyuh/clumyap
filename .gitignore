@@ -1,4 +1,5 @@
 # build output and generated audio
 /service/clumyap
+/dist/
 *.mp3
 *.wav

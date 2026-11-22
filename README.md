@@ -13,6 +13,20 @@ Offline English text-to-speech. Kokoro voices running locally through sherpa-onn
 
 Clients for other platforms (Android, desktop) go in their own top-level folders next to `service/`.
 
+## Install from a release archive (macOS)
+
+Download `clumyap-<version>-macos-arm64.tar.gz` (Apple Silicon) or `-amd64` (Intel), then:
+
+```bash
+tar -xzf clumyap-0.1.0-macos-arm64.tar.gz
+mkdir -p ~/.local/share && mv clumyap-0.1.0-macos-arm64 ~/.local/share/clumyap
+xattr -dr com.apple.quarantine ~/.local/share/clumyap   # files from the internet are blocked until this
+ln -sf ~/.local/share/clumyap/clumyap /usr/local/bin/clumyap
+clumyap --version
+```
+
+Keep the `lib/` folder next to the `clumyap` binary; the binary loads its libraries from there. The archives are signed ad hoc, not notarized by Apple, which is why the `xattr` step is needed.
+
 ## Build and install
 
 Needs Go 1.25 or newer, on macOS (Apple Silicon or Intel), Linux or Windows.
@@ -24,6 +38,12 @@ go test ./...       # runs the tests; a few skip until the model is downloaded
 ```
 
 The first run downloads the Kokoro model (about 350 MB) to `~/.cache/clumyap`.
+
+A `go install` build finds its libraries in your Go module cache, so it only runs on the machine that built it. To make archives you can give to others:
+
+```bash
+scripts/package.sh            # dist/clumyap-<version>-macos-arm64.tar.gz and -amd64.tar.gz
+```
 
 The version lives in `service/VERSION` and is compiled into the binary; `clumyap --version` prints it. Bump it there and rebuild.
 
