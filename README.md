@@ -25,6 +25,8 @@ go test ./...       # runs the tests; a few skip until the model is downloaded
 
 The first run downloads the Kokoro model (about 350 MB) to `~/.cache/clumyap`.
 
+The version lives in `service/VERSION` and is compiled into the binary; `clumyap --version` prints it. Bump it there and rebuild.
+
 ## Use
 
 ```bash

@@ -3,10 +3,12 @@ package main
 import (
 	"os"
 	"path/filepath"
+	"regexp"
 	"strings"
 	"testing"
 
 	tea "charm.land/bubbletea/v2"
+	"charm.land/lipgloss/v2"
 )
 
 func TestTUICommands(t *testing.T) {
@@ -115,4 +117,26 @@ func keyPress(name string) tea.KeyPressMsg {
 		return tea.KeyPressMsg{Code: 'j', Mod: tea.ModCtrl}
 	}
 	panic("unknown key " + name)
+}
+
+func TestBannerAndLogo(t *testing.T) {
+	if !regexp.MustCompile(`^\d+\.\d+\.\d+`).MatchString(version()) {
+		t.Fatalf("VERSION %q is not a version number", version())
+	}
+	lines := logoLines()
+	if len(lines) != len(logoArt)/2 {
+		t.Fatalf("want %d logo lines, got %d", len(logoArt)/2, len(lines))
+	}
+	for i, l := range lines {
+		if w := lipgloss.Width(l); w != 16 {
+			t.Errorf("logo line %d is %d cells wide, want 16", i, w)
+		}
+	}
+	o, _ := parseArgs(nil, map[string]string{})
+	b := banner(newTUI(o).o)
+	for _, want := range []string{"v" + version(), "kokoro-multi-lang-v1_0", "af_heart", "/help"} {
+		if !strings.Contains(b, want) {
+			t.Errorf("banner is missing %q", want)
+		}
+	}
 }

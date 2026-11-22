@@ -38,6 +38,7 @@ Flags:
       --voices        list voices
       --models        list models (* = default, installed = already downloaded)
   -q, --quiet         no progress output
+      --version       print the version
 
 Settings (saved defaults, a flag always wins):
       --config        show settings
@@ -53,6 +54,7 @@ type options struct {
 	text, output, file, voice, lang, model        string
 	speed, pause, sentencePause                   float64
 	play, listVoices, listModels, quiet, showConf bool
+	showVersion                                   bool
 	sets, unsets                                  multiFlag
 	cfg                                           map[string]string
 }
@@ -128,6 +130,7 @@ func parseArgs(args []string, cfg map[string]string) (options, error) {
 	fs.BoolVar(&o.listVoices, "voices", false, "")
 	fs.BoolVar(&o.listModels, "models", false, "")
 	fs.BoolVar(&o.showConf, "config", false, "")
+	fs.BoolVar(&o.showVersion, "version", false, "")
 	fs.Var(&o.sets, "set", "")
 	fs.Var(&o.unsets, "unset", "")
 
@@ -149,7 +152,7 @@ func parseArgs(args []string, cfg map[string]string) (options, error) {
 	o.text = strings.Join(words, " ")
 
 	switch {
-	case o.listVoices || o.listModels || o.showConf || len(o.sets)+len(o.unsets) > 0:
+	case o.showVersion || o.listVoices || o.listModels || o.showConf || len(o.sets)+len(o.unsets) > 0:
 		return o, nil
 	case !isModel(o.model):
 		return o, fmt.Errorf("%w: unknown model %q, see --models", errUsage, o.model)
@@ -220,6 +223,10 @@ func run(o options) error {
 			return err
 		}
 		printConfig(o.cfg)
+		return nil
+	}
+	if o.showVersion {
+		fmt.Println("clumyap", version())
 		return nil
 	}
 	if o.showConf {

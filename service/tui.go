@@ -54,14 +54,31 @@ var (
 	box    = lipgloss.NewStyle().Border(lipgloss.RoundedBorder()).Padding(0, 1)
 )
 
-func banner() string {
+// banner is the start-up card: logo, version, the folder files are saved relative to, model and voice.
+func banner(o options) string {
 	word := "clumyap"
 	colors := lipgloss.Blend1D(len(word), cPurple, cPink, cAmber)
-	var b strings.Builder
+	var name strings.Builder
 	for i, r := range word {
-		b.WriteString(lipgloss.NewStyle().Foreground(colors[i]).Bold(true).Render(string(r)))
+		name.WriteString(lipgloss.NewStyle().Foreground(colors[i]).Bold(true).Render(string(r)))
 	}
-	return "♪ " + b.String() + dim.Render("  offline text-to-speech · ") + cyan.Render("/help") + dim.Render(" for commands · ") + cyan.Render("Tab") + dim.Render(" to complete · ") + cyan.Render("shift/option+enter") + dim.Render(" new line")
+	cwd, _ := os.Getwd()
+	if home, err := os.UserHomeDir(); err == nil && strings.HasPrefix(cwd, home) {
+		cwd = "~" + strings.TrimPrefix(cwd, home)
+	}
+	info := strings.Join([]string{
+		name.String() + " " + dim.Render("v"+version()),
+		dim.Render("offline text-to-speech"),
+		"",
+		dim.Render("model  ") + green.Render(o.model),
+		dim.Render("voice  ") + pink.Render(o.voice),
+		dim.Render("dir    ") + cyan.Render(cwd),
+	}, "\n")
+	body := lipgloss.JoinHorizontal(lipgloss.Center, strings.Join(logoLines(), "\n"), "   ", info)
+	card := lipgloss.NewStyle().Border(lipgloss.RoundedBorder()).BorderForeground(cPurple).Padding(0, 2).Render(body)
+	hints := " " + cyan.Render("/help") + dim.Render(" commands · ") + cyan.Render("Tab") + dim.Render(" complete · ") +
+		cyan.Render("shift/option+enter") + dim.Render(" new line")
+	return card + "\n" + hints
 }
 
 func helpText() string {
@@ -194,7 +211,7 @@ func fail(err error) tea.Cmd                     { return say(red, "✗ "+err.Er
 func done(s string) tea.Cmd                      { return tea.Println(green.Render("✓ ") + s) }
 
 func (m *tui) Init() tea.Cmd {
-	return tea.Batch(tea.Println(banner()), m.load(m.o.model))
+	return tea.Batch(tea.Println(banner(m.o)), m.load(m.o.model))
 }
 
 func (m *tui) load(name string) tea.Cmd {
