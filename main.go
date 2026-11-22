@@ -11,13 +11,9 @@ import (
 	"os/exec"
 	"path/filepath"
 	"regexp"
-	"runtime"
 	"strconv"
 	"strings"
 	"time"
-
-	pp "github.com/csukuangfj/piper-phonemize-go/piper_phonemize"
-	sherpa "github.com/k2-fsa/sherpa-onnx-go/v2/sherpa_onnx"
 )
 
 const usageText = `clumyap - offline English text-to-speech
@@ -26,6 +22,8 @@ Usage:
   clumyap "text" [flags]
   clumyap -f file.txt [flags]
   cat file.txt | clumyap [flags]
+  clumyap start [flags]        interactive session, type /help inside
+  clumyap -- start             speak the word "start"
 
 Flags:
   -o, --output FILE   output .mp3 or .wav, "-" for MP3 on stdout (default clumyap-<time>.mp3)
@@ -60,12 +58,23 @@ type options struct {
 var errUsage = errors.New("usage")
 
 func main() {
+	args := os.Args[1:]
+	start := len(args) > 0 && args[0] == "start"
+	if start {
+		args = args[1:]
+	}
 	cfg, err := loadConfig()
 	var opts options
 	if err == nil {
-		opts, err = parseArgs(os.Args[1:], cfg)
+		opts, err = parseArgs(args, cfg)
 	}
-	if err == nil {
+	switch {
+	case err != nil:
+	case start && opts.text != "":
+		err = fmt.Errorf("%w: start takes no text; type it in the session (to speak the word, use: clumyap -- start)", errUsage)
+	case start:
+		err = runTUI(opts)
+	default:
 		err = run(opts)
 	}
 	switch {
@@ -208,75 +217,38 @@ func run(o options) error {
 		return nil
 	}
 	if o.listVoices {
-		printVoices()
+		fmt.Println(voicesText())
 		return nil
 	}
 	if o.listModels {
-		for _, m := range models {
-			mark, status := " ", ""
-			if m.name == o.model {
-				mark = "*"
-			}
-			if modelInstalled(m) {
-				status = "installed"
-			}
-			fmt.Printf("%s %-28s %-7s %-10s %s\n", mark, m.name, m.size, status, m.note)
-		}
+		fmt.Println(modelsText(o.model))
 		return nil
 	}
 	text, err := readText(o)
 	if err != nil {
 		return err
 	}
-	paras := paragraphs(text)
-	if len(paras) == 0 {
+	if len(paragraphs(text)) == 0 {
 		return fmt.Errorf("%w: text is empty", errUsage)
 	}
 
 	m, _ := findModel(o.model)
-	dir, err := ensureModel(m, o.quiet)
+	if _, err := ensureModel(m, o.quiet); err != nil {
+		return err
+	}
+	e, err := loadEngine(m)
 	if err != nil {
 		return err
 	}
-	cfg := sherpa.OfflineTtsConfig{MaxNumSentences: 1}
-	cfg.Model.Kokoro = sherpa.OfflineTtsKokoroModelConfig{
-		Model:       filepath.Join(dir, m.file),
-		Voices:      filepath.Join(dir, "voices.bin"),
-		Tokens:      filepath.Join(dir, "tokens.txt"),
-		LengthScale: 1.0,
-	}
-	cfg.Model.NumThreads = min(runtime.NumCPU(), 8)
-	tts := sherpa.NewOfflineTts(&cfg)
-	if tts == nil {
-		return fmt.Errorf("failed to load model from %s (delete that folder to re-download)", dir)
-	}
-	defer sherpa.DeleteOfflineTts(tts)
-
-	// The lexicon alone silently drops unknown words, numbers and inflections; espeak phonemizes everything.
-	if pp.Initialize(filepath.Join(dir, "espeak-ng-data")) < 0 {
-		return fmt.Errorf("failed to load espeak-ng data from %s", dir)
-	}
-	espeakVoice := map[string]string{"en-us": "en-us", "en-gb": "en-gb-x-rp"}[o.lang]
-
-	sid := voiceID(o.voice)
-	rate := tts.SampleRate()
-	pause := make([]float32, rate*6/10) // 0.6 s between paragraphs
-	var samples []float32
-	for i, p := range paras {
-		gen := &sherpa.GenerationConfig{Sid: sid, Speed: float32(o.speed), PhonemeCodepoints: phonemize(p, espeakVoice)}
-		audio := tts.GenerateWithConfig(p, gen, func(_ []float32, pct float32) bool {
-			logf(o.quiet, "\r  [%d/%d] %3.0f%%", i+1, len(paras), pct*100)
-			return true
-		})
-		if audio == nil {
-			return fmt.Errorf("speech generation failed on paragraph %d", i+1)
-		}
-		if i > 0 {
-			samples = append(samples, pause...)
-		}
-		samples = append(samples, audio.Samples...)
+	defer e.close()
+	samples, err := e.synth(text, o.voice, o.lang, o.speed, func(i, n int, pct float32) {
+		logf(o.quiet, "\r  [%d/%d] %3.0f%%", i, n, pct*100)
+	})
+	if err != nil {
+		return err
 	}
 	logf(o.quiet, "\n")
+	rate := e.rate
 
 	if o.output == "-" {
 		return writeMP3(os.Stdout, samples, rate)
@@ -289,18 +261,6 @@ func run(o options) error {
 		return exec.Command("afplay", o.output).Run()
 	}
 	return nil
-}
-
-func phonemize(text, voice string) [][]int32 {
-	r := pp.Phonemize(text, voice)
-	defer pp.DeletePhonemizeResult(r)
-	out := make([][]int32, r.GetNumSentences())
-	for s := range out {
-		for _, c := range r.GetPhonemes(s) {
-			out[s] = append(out[s], int32(c))
-		}
-	}
-	return out
 }
 
 func writeFile(path string, samples []float32, rate int) error {

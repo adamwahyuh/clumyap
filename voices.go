@@ -25,8 +25,9 @@ func voiceID(name string) int {
 	return -1
 }
 
-func printVoices() {
+func voicesText() string {
 	groups := map[string]string{"af": "American Female", "am": "American Male", "bf": "British Female", "bm": "British Male"}
+	var b strings.Builder
 	for _, g := range []string{"af", "am", "bf", "bm"} {
 		var names []string
 		for _, v := range voices {
@@ -34,6 +35,7 @@ func printVoices() {
 				names = append(names, v)
 			}
 		}
-		fmt.Printf("%s:\n  %s\n", groups[g], strings.Join(names, "  "))
+		fmt.Fprintf(&b, "%s:\n  %s\n", groups[g], strings.Join(names, "  "))
 	}
+	return strings.TrimSuffix(b.String(), "\n")
 }

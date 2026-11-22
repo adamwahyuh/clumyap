@@ -51,16 +51,21 @@ func normalizeSetting(key, val string) (string, error) {
 		if val == "" {
 			return "", fmt.Errorf("output-dir is empty, use --unset output-dir instead")
 		}
-		if rest, ok := strings.CutPrefix(val, "~"); ok {
-			home, err := os.UserHomeDir()
-			if err != nil {
-				return "", err
-			}
-			val = home + rest
-		}
-		return filepath.Abs(val)
+		return expandPath(val)
 	}
 	return "", fmt.Errorf("unknown setting %q (settings: %s)", key, strings.Join(settingKeys, ", "))
+}
+
+// expandPath turns "~/x" and relative paths into absolute ones.
+func expandPath(p string) (string, error) {
+	if rest, ok := strings.CutPrefix(p, "~"); ok {
+		home, err := os.UserHomeDir()
+		if err != nil {
+			return "", err
+		}
+		p = home + rest
+	}
+	return filepath.Abs(p)
 }
 
 // loadConfig returns the saved settings; a missing file means none, invalid entries are dropped with a warning.

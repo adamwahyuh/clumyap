@@ -11,12 +11,12 @@ import (
 	"strings"
 )
 
-type model struct{ name, file, size, note string }
+type model struct{ name, short, file, size, note string }
 
 // Both share voices.bin and speaker IDs, so the voices list applies to either.
 var models = []model{
-	{"kokoro-multi-lang-v1_0", "model.onnx", "350 MB", "full precision, best quality"},
-	{"kokoro-int8-multi-lang-v1_0", "model.int8.onnx", "132 MB", "int8, smaller download (~2x slower on Apple Silicon)"},
+	{"kokoro-multi-lang-v1_0", "full", "model.onnx", "350 MB", "full precision, best quality"},
+	{"kokoro-int8-multi-lang-v1_0", "int8", "model.int8.onnx", "132 MB", "int8, smaller download (~2x slower on Apple Silicon)"},
 }
 
 func findModel(name string) (model, bool) {
@@ -26,6 +26,21 @@ func findModel(name string) (model, bool) {
 		}
 	}
 	return model{}, false
+}
+
+func modelsText(current string) string {
+	var b strings.Builder
+	for _, m := range models {
+		mark, status := " ", ""
+		if m.name == current {
+			mark = "*"
+		}
+		if modelInstalled(m) {
+			status = "installed"
+		}
+		fmt.Fprintf(&b, "%s %-28s %-7s %-10s %s\n", mark, m.name, m.size, status, m.note)
+	}
+	return strings.TrimSuffix(b.String(), "\n")
 }
 
 func modelInstalled(m model) bool {
