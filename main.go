@@ -32,19 +32,29 @@ Flags:
   -v, --voice NAME    voice (default af_heart), see --voices
   -s, --speed N       speed 0.5-2.0 (default 1.0)
   -l, --lang LANG     en-us or en-gb (default en-us)
+  -m, --model NAME    model (default kokoro-multi-lang-v1_0), see --models
       --play          play the result when done
       --voices        list voices
+      --models        list models (* = default, installed = already downloaded)
   -q, --quiet         no progress output
 
 Env:
+  CLUMYAP_MODEL       default model, overridden by --model
   CLUMYAP_MODEL_DIR   model folder (default ~/.cache/clumyap)
   CLUMYAP_OUTPUT_DIR  folder for the auto-named output when -o is not given (default: current folder)
 `
 
 type options struct {
-	text, output, file, voice, lang string
-	speed                           float64
-	play, listVoices, quiet         bool
+	text, output, file, voice, lang, model string
+	speed                                  float64
+	play, listVoices, listModels, quiet    bool
+}
+
+func defaultModel() string {
+	if m := os.Getenv("CLUMYAP_MODEL"); m != "" {
+		return m
+	}
+	return models[0].name
 }
 
 var errUsage = errors.New("usage")
@@ -89,8 +99,12 @@ func parseArgs(args []string) (options, error) {
 	for _, n := range []string{"q", "quiet"} {
 		fs.BoolVar(&o.quiet, n, false, "")
 	}
+	for _, n := range []string{"m", "model"} {
+		fs.StringVar(&o.model, n, defaultModel(), "")
+	}
 	fs.BoolVar(&o.play, "play", false, "")
 	fs.BoolVar(&o.listVoices, "voices", false, "")
+	fs.BoolVar(&o.listModels, "models", false, "")
 
 	// Go's flag package stops at the first positional arg; keep parsing so flags may follow the text.
 	var words []string
@@ -110,8 +124,10 @@ func parseArgs(args []string) (options, error) {
 	o.text = strings.Join(words, " ")
 
 	switch {
-	case o.listVoices:
+	case o.listVoices || o.listModels:
 		return o, nil
+	case !isModel(o.model):
+		return o, fmt.Errorf("%w: unknown model %q, see --models", errUsage, o.model)
 	case o.text != "" && o.file != "":
 		return o, fmt.Errorf("%w: give text or --file, not both", errUsage)
 	case o.speed < 0.5 || o.speed > 2:
@@ -130,6 +146,11 @@ func parseArgs(args []string) (options, error) {
 		return o, fmt.Errorf("%w: output must end in .mp3 or .wav", errUsage)
 	}
 	return o, nil
+}
+
+func isModel(name string) bool {
+	_, ok := findModel(name)
+	return ok
 }
 
 func readText(o options) (string, error) {
@@ -169,6 +190,19 @@ func run(o options) error {
 		fmt.Println(strings.Join(voices, "\n"))
 		return nil
 	}
+	if o.listModels {
+		for _, m := range models {
+			mark, status := " ", ""
+			if m.name == o.model {
+				mark = "*"
+			}
+			if modelInstalled(m) {
+				status = "installed"
+			}
+			fmt.Printf("%s %-28s %-7s %-10s %s\n", mark, m.name, m.size, status, m.note)
+		}
+		return nil
+	}
 	text, err := readText(o)
 	if err != nil {
 		return err
@@ -178,13 +212,14 @@ func run(o options) error {
 		return fmt.Errorf("%w: text is empty", errUsage)
 	}
 
-	dir, err := ensureModel(o.quiet)
+	m, _ := findModel(o.model)
+	dir, err := ensureModel(m, o.quiet)
 	if err != nil {
 		return err
 	}
 	cfg := sherpa.OfflineTtsConfig{MaxNumSentences: 1}
 	cfg.Model.Kokoro = sherpa.OfflineTtsKokoroModelConfig{
-		Model:       filepath.Join(dir, "model.onnx"),
+		Model:       filepath.Join(dir, m.file),
 		Voices:      filepath.Join(dir, "voices.bin"),
 		Tokens:      filepath.Join(dir, "tokens.txt"),
 		LengthScale: 1.0,

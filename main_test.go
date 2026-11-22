@@ -20,6 +20,13 @@ func TestParseArgs(t *testing.T) {
 	if o, _ := parseArgs([]string{"hi", "-o", "x.mp3"}); o.output != "x.mp3" {
 		t.Errorf("-o must win over CLUMYAP_OUTPUT_DIR: %s", o.output)
 	}
+	t.Setenv("CLUMYAP_MODEL", "kokoro-int8-multi-lang-v1_0")
+	if o, _ := parseArgs([]string{"hi"}); o.model != "kokoro-int8-multi-lang-v1_0" {
+		t.Errorf("CLUMYAP_MODEL not applied: %s", o.model)
+	}
+	if o, _ := parseArgs([]string{"hi", "-m", "kokoro-multi-lang-v1_0"}); o.model != "kokoro-multi-lang-v1_0" {
+		t.Errorf("--model must win over CLUMYAP_MODEL: %s", o.model)
+	}
 	for _, bad := range [][]string{
 		{"hi", "-s", "3"},
 		{"hi", "-v", "nobody"},
@@ -27,6 +34,7 @@ func TestParseArgs(t *testing.T) {
 		{"hi", "-f", "x.txt"},
 		{"hi", "-o", "-", "--play"},
 		{"hi", "--nope"},
+		{"hi", "-m", "kokoro-v9"},
 	} {
 		if _, err := parseArgs(bad); !errors.Is(err, errUsage) {
 			t.Errorf("%v: want usage error, got %v", bad, err)

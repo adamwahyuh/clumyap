@@ -11,10 +11,31 @@ import (
 	"strings"
 )
 
-const (
-	modelName = "kokoro-multi-lang-v1_0"
-	modelURL  = "https://github.com/k2-fsa/sherpa-onnx/releases/download/tts-models/" + modelName + ".tar.bz2"
-)
+type model struct{ name, file, size, note string }
+
+// Both share voices.bin and speaker IDs, so the voices list applies to either.
+var models = []model{
+	{"kokoro-multi-lang-v1_0", "model.onnx", "350 MB", "full precision, best quality"},
+	{"kokoro-int8-multi-lang-v1_0", "model.int8.onnx", "132 MB", "int8, smaller download (~2x slower on Apple Silicon)"},
+}
+
+func findModel(name string) (model, bool) {
+	for _, m := range models {
+		if m.name == name {
+			return m, true
+		}
+	}
+	return model{}, false
+}
+
+func modelInstalled(m model) bool {
+	base, err := modelDir()
+	if err != nil {
+		return false
+	}
+	_, err = os.Stat(filepath.Join(base, m.name, m.file))
+	return err == nil
+}
 
 func modelDir() (string, error) {
 	if d := os.Getenv("CLUMYAP_MODEL_DIR"); d != "" {
@@ -28,21 +49,21 @@ func modelDir() (string, error) {
 }
 
 // ensureModel returns the model folder, downloading and unpacking it on first use.
-func ensureModel(quiet bool) (string, error) {
+func ensureModel(m model, quiet bool) (string, error) {
 	base, err := modelDir()
 	if err != nil {
 		return "", err
 	}
-	dir := filepath.Join(base, modelName)
-	if _, err := os.Stat(filepath.Join(dir, "model.onnx")); err == nil {
+	dir := filepath.Join(base, m.name)
+	if modelInstalled(m) {
 		return dir, nil
 	}
 	if err := os.MkdirAll(base, 0o755); err != nil {
 		return "", err
 	}
-	logf(quiet, "First run: downloading the Kokoro model (~350 MB) to %s\n", base)
+	logf(quiet, "Downloading model %s (%s) to %s\n", m.name, m.size, base)
 
-	resp, err := http.Get(modelURL)
+	resp, err := http.Get("https://github.com/k2-fsa/sherpa-onnx/releases/download/tts-models/" + m.name + ".tar.bz2")
 	if err != nil {
 		return "", fmt.Errorf("download model: %w", err)
 	}
@@ -66,7 +87,7 @@ func ensureModel(quiet bool) (string, error) {
 		return "", fmt.Errorf("unpack model: %w", err)
 	}
 	logf(quiet, "\n")
-	if err := os.Rename(filepath.Join(tmp, modelName), dir); err != nil {
+	if err := os.Rename(filepath.Join(tmp, m.name), dir); err != nil {
 		return "", err
 	}
 	return dir, nil
