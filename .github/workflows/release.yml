@@ -71,6 +71,17 @@ jobs:
           "$app" -q "Hello from GitHub Actions. It costs 4 dollars in 2026." -o smoke/hello.wav
           test "$(wc -c < smoke/hello.wav)" -gt 100000
 
+      # The real one-line install: download from the latest GitHub release with the animation on.
+      - name: Install from GitHub with the installer animation
+        run: |
+          if [ "$RUNNER_OS" = Windows ]; then
+            CLUMYAP_FANCY=1 powershell -NoProfile -ExecutionPolicy Bypass -File install.ps1
+            "$(cygpath -u "$LOCALAPPDATA")/Programs/clumyap/clumyap.exe" --version
+          else
+            CLUMYAP_FANCY=1 sh install.sh
+            "$HOME/.local/bin/clumyap" --version
+          fi
+
       # Install from the archive just built, then install again while clumyap is running, which is what
       # `clumyap update` and /update do. On Windows the running files are locked, so this is the real test.
       - name: Install, then update while running

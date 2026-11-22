@@ -130,6 +130,7 @@ type (
 		pct         float32
 	}
 	playDoneMsg struct{ cmd *exec.Cmd }
+	downloadMsg struct{ read, total int64 }
 	updateMsg   struct {
 		latest string // "" when already current
 		err    error
@@ -253,12 +254,18 @@ func (m *tui) Init() tea.Cmd {
 
 func (m *tui) load(name string) tea.Cmd {
 	mod, _ := findModel(name)
-	m.busy = "loading " + name
+	m.busy, m.pct = "loading "+name, ""
 	if !modelInstalled(mod) {
-		m.busy = "downloading " + name + " (" + mod.size + ")"
+		m.busy = "downloading the voice model, once"
 	}
+	p := m.prog
 	return tea.Batch(m.spin.Tick, func() tea.Msg {
-		if _, err := ensureModel(mod, true); err != nil {
+		progress := func(read, total int64) {
+			if p != nil {
+				p.Send(downloadMsg{read, total})
+			}
+		}
+		if _, err := ensureModel(mod, progress); err != nil {
 			return loadedMsg{err: err}
 		}
 		e, err := loadEngine(mod)
@@ -329,6 +336,9 @@ func (m *tui) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		var cmd tea.Cmd
 		m.spin, cmd = m.spin.Update(msg)
 		return m, cmd
+	case downloadMsg:
+		m.pct = "  " + progressBar(msg.read, msg.total)
+		return m, nil
 	case progressMsg:
 		m.pct = fmt.Sprintf(" %.0f%%", msg.pct*100)
 		if msg.total > 1 {
@@ -336,7 +346,7 @@ func (m *tui) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		return m, nil
 	case loadedMsg:
-		m.busy = ""
+		m.busy, m.pct = "", ""
 		if msg.err != nil {
 			return m, fail(msg.err)
 		}

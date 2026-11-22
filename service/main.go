@@ -265,8 +265,16 @@ func run(o options) error {
 	}
 
 	m, _ := findModel(o.model)
-	if _, err := ensureModel(m, o.quiet); err != nil {
+	var progress func(read, total int64)
+	if !o.quiet && !modelInstalled(m) {
+		logf(false, "Downloading the voice model %s (%s), once\n", m.name, m.size)
+		progress = func(read, total int64) { logf(false, "\r  %s", progressBar(read, total)) }
+	}
+	if _, err := ensureModel(m, progress); err != nil {
 		return err
+	}
+	if progress != nil {
+		logf(false, "\n")
 	}
 	e, err := loadEngine(m)
 	if err != nil {

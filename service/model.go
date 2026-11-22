@@ -64,7 +64,8 @@ func modelDir() (string, error) {
 }
 
 // ensureModel returns the model folder, downloading and unpacking it on first use.
-func ensureModel(m model, quiet bool) (string, error) {
+// progress, when not nil, is called as the download advances.
+func ensureModel(m model, progress func(read, total int64)) (string, error) {
 	base, err := modelDir()
 	if err != nil {
 		return "", err
@@ -76,8 +77,6 @@ func ensureModel(m model, quiet bool) (string, error) {
 	if err := os.MkdirAll(base, 0o755); err != nil {
 		return "", err
 	}
-	logf(quiet, "Downloading model %s (%s) to %s\n", m.name, m.size, base)
-
 	resp, err := http.Get("https://github.com/k2-fsa/sherpa-onnx/releases/download/tts-models/" + m.name + ".tar.bz2")
 	if err != nil {
 		return "", fmt.Errorf("download model: %w", err)
@@ -95,13 +94,12 @@ func ensureModel(m model, quiet bool) (string, error) {
 	defer os.RemoveAll(tmp)
 
 	body := io.Reader(resp.Body)
-	if !quiet {
-		body = &progressReader{r: resp.Body, total: resp.ContentLength}
+	if progress != nil {
+		body = &progressReader{r: resp.Body, total: resp.ContentLength, fn: progress}
 	}
 	if err := untar(bzip2.NewReader(body), tmp); err != nil {
 		return "", fmt.Errorf("unpack model: %w", err)
 	}
-	logf(quiet, "\n")
 	if err := os.Rename(filepath.Join(tmp, m.name), dir); err != nil {
 		return "", err
 	}
@@ -146,10 +144,12 @@ func untar(r io.Reader, dst string) error {
 	}
 }
 
+// progressReader reports each whole percent of the download (unpacking runs in the same stream).
 type progressReader struct {
 	r           io.Reader
 	total, read int64
 	lastPct     int64
+	fn          func(read, total int64)
 }
 
 func (p *progressReader) Read(b []byte) (int, error) {
@@ -158,8 +158,17 @@ func (p *progressReader) Read(b []byte) (int, error) {
 	if p.total > 0 {
 		if pct := p.read * 100 / p.total; pct != p.lastPct {
 			p.lastPct = pct
-			fmt.Fprintf(os.Stderr, "\r  %3d%%  %d/%d MB", pct, p.read>>20, p.total>>20)
+			p.fn(p.read, p.total)
 		}
 	}
 	return n, err
+}
+
+// progressBar draws "████████░░░░░░░░░░░░  42%  147/350 MB", the same bar as the installers.
+func progressBar(read, total int64) string {
+	if total <= 0 {
+		return fmt.Sprintf("%d MB", read>>20)
+	}
+	filled := int(read * 20 / total)
+	return fmt.Sprintf("%s%s  %3d%%  %d/%d MB", strings.Repeat("█", filled), strings.Repeat("░", 20-filled), read*100/total, read>>20, total>>20)
 }

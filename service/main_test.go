@@ -160,3 +160,30 @@ func TestUpdateHelpers(t *testing.T) {
 		t.Errorf("a build from source must refuse to update, got %v", err)
 	}
 }
+
+func TestProgressBar(t *testing.T) {
+	for _, c := range []struct {
+		read, total int64
+		want        string
+	}{
+		{0, 100 << 20, "░░░░░░░░░░░░░░░░░░░░    0%  0/100 MB"},
+		{42 << 20, 100 << 20, "████████░░░░░░░░░░░░   42%  42/100 MB"},
+		{100 << 20, 100 << 20, "████████████████████  100%  100/100 MB"},
+		{7 << 20, 0, "7 MB"},
+	} {
+		if got := progressBar(c.read, c.total); got != c.want {
+			t.Errorf("progressBar(%d, %d) = %q, want %q", c.read, c.total, got, c.want)
+		}
+	}
+	var calls []int64
+	r := &progressReader{r: bytes.NewReader(make([]byte, 1000)), total: 1000, fn: func(read, _ int64) { calls = append(calls, read) }}
+	buf := make([]byte, 7)
+	for {
+		if _, err := r.Read(buf); err != nil {
+			break
+		}
+	}
+	if len(calls) != 100 || calls[len(calls)-1] != 1000 {
+		t.Errorf("want one report per percent ending at 1000, got %d reports, last %v", len(calls), calls[len(calls)-1])
+	}
+}
