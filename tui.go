@@ -20,12 +20,13 @@ import (
 var tuiCommands = []struct{ name, args, desc string }{
 	{"voice", "[name]", "switch voice (no name: list voices)"},
 	{"speed", "N", "speed 0.5-2.0"},
+	{"pause", "N", "seconds of silence between paragraphs, 0-3"},
 	{"lang", "en-us|en-gb", "accent of the pronunciation"},
 	{"model", "[name]", "switch model (no name: list models)"},
 	{"replay", "", "play the last audio again"},
 	{"stop", "", "stop playback (or Esc)"},
 	{"save", "[file]", "save the last audio (.mp3/.wav, default: output-dir)"},
-	{"default", "", "keep the current voice, speed, lang and model as defaults"},
+	{"default", "", "keep the current voice, speed, pause, lang and model as defaults"},
 	{"help", "", "show commands"},
 	{"exit", "", "quit (or Ctrl+C)"},
 }
@@ -256,10 +257,10 @@ func (m *tui) submit() tea.Cmd {
 	}
 	m.stop()
 	m.busy, m.pct = "generating", ""
-	e, voice, lang, speed, p := m.eng, m.o.voice, m.o.lang, m.o.speed, m.prog
+	e, voice, lang, speed, pause, p := m.eng, m.o.voice, m.o.lang, m.o.speed, m.o.pause, m.prog
 	return tea.Batch(echo, m.spin.Tick, func() tea.Msg {
 		start := time.Now()
-		s, err := e.synth(line, voice, lang, speed, func(i, n int, pct float32) {
+		s, err := e.synth(line, voice, lang, speed, pause, func(i, n int, pct float32) {
 			if p != nil {
 				p.Send(progressMsg{i, n, pct})
 			}
@@ -279,7 +280,7 @@ func (m *tui) command(line string) tea.Cmd {
 	case "stop":
 		m.stop()
 		return say(dim, "stopped")
-	case "voice", "speed", "lang", "model":
+	case "voice", "speed", "pause", "lang", "model":
 		if arg == "" {
 			switch name {
 			case "voice":
@@ -298,6 +299,8 @@ func (m *tui) command(line string) tea.Cmd {
 			m.o.voice = val
 		case "speed":
 			m.o.speed, _ = strconv.ParseFloat(val, 64)
+		case "pause":
+			m.o.pause, _ = strconv.ParseFloat(val, 64)
 		case "lang":
 			m.o.lang = val
 		case "model":
@@ -335,7 +338,7 @@ func (m *tui) command(line string) tea.Cmd {
 		}
 		return done(dim.Render("saved ") + cyan.Render(path))
 	case "default":
-		sets := []string{"voice=" + m.o.voice, "speed=" + strconv.FormatFloat(m.o.speed, 'f', -1, 64), "lang=" + m.o.lang, "model=" + m.o.model}
+		sets := []string{"voice=" + m.o.voice, "speed=" + strconv.FormatFloat(m.o.speed, 'f', -1, 64), "pause=" + strconv.FormatFloat(m.o.pause, 'f', -1, 64), "lang=" + m.o.lang, "model=" + m.o.model}
 		if err := updateConfig(m.o.cfg, sets, nil); err != nil {
 			return fail(err)
 		}

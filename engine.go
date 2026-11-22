@@ -4,7 +4,6 @@ import (
 	"fmt"
 	"path/filepath"
 	"runtime"
-	"strings"
 
 	pp "github.com/csukuangfj/piper-phonemize-go/piper_phonemize"
 	sherpa "github.com/k2-fsa/sherpa-onnx-go/v2/sherpa_onnx"
@@ -15,6 +14,8 @@ type engine struct {
 	tts   *sherpa.OfflineTts
 	model model
 	rate  int
+	dir   string
+	g2ps  map[string]*g2p // per lang, loaded on first use
 }
 
 // loadEngine loads an installed model; call ensureModel first.
@@ -36,29 +37,43 @@ func loadEngine(m model) (*engine, error) {
 	if tts == nil {
 		return nil, fmt.Errorf("failed to load model from %s (delete that folder to re-download)", dir)
 	}
-	// The lexicon alone silently drops unknown words, numbers and inflections; espeak phonemizes everything.
+	// espeak covers words the lexicon lacks (sherpa's own lexicon path silently drops them).
 	// Initialize only takes effect once per process; every model ships the same espeak-ng-data.
 	if pp.Initialize(filepath.Join(dir, "espeak-ng-data")) < 0 {
 		sherpa.DeleteOfflineTts(tts)
 		return nil, fmt.Errorf("failed to load espeak-ng data from %s", dir)
 	}
-	return &engine{tts: tts, model: m, rate: tts.SampleRate()}, nil
+	return &engine{tts: tts, model: m, rate: tts.SampleRate(), dir: dir, g2ps: map[string]*g2p{}}, nil
 }
 
 func (e *engine) close() { sherpa.DeleteOfflineTts(e.tts) }
 
-// synth speaks text (split into paragraphs) and returns mono float samples at e.rate.
-// progress may be nil.
-func (e *engine) synth(text, voice, lang string, speed float64, progress func(para, total int, pct float32)) ([]float32, error) {
+// synth speaks text (split into paragraphs, pause seconds of silence between them) and returns
+// mono float samples at e.rate. progress may be nil.
+func (e *engine) synth(text, voice, lang string, speed, pause float64, progress func(para, total int, pct float32)) ([]float32, error) {
 	paras := paragraphs(text)
 	if len(paras) == 0 {
 		return nil, fmt.Errorf("%w: text is empty", errUsage)
 	}
-	espeakVoice := map[string]string{"en-us": "en-us", "en-gb": "en-gb-x-rp"}[lang]
-	pause := make([]float32, e.rate*6/10) // 0.6 s between paragraphs
+	g, ok := e.g2ps[lang]
+	if !ok {
+		var err error
+		if g, err = newG2P(e.dir, lang); err != nil {
+			return nil, fmt.Errorf("load lexicon: %w", err)
+		}
+		e.g2ps[lang] = g
+	}
+	silence := make([]float32, int(float64(e.rate)*pause))
 	var samples []float32
 	for i, p := range paras {
-		gen := &sherpa.GenerationConfig{Sid: voiceID(voice), Speed: float32(speed), PhonemeCodepoints: phonemize(p, espeakVoice)}
+		var codepoints [][]int32
+		for _, c := range g.chunks(p) {
+			codepoints = append(codepoints, []int32(c))
+		}
+		if len(codepoints) == 0 {
+			continue
+		}
+		gen := &sherpa.GenerationConfig{Sid: voiceID(voice), Speed: float32(speed), PhonemeCodepoints: codepoints}
 		audio := e.tts.GenerateWithConfig(p, gen, func(_ []float32, pct float32) bool {
 			if progress != nil {
 				progress(i+1, len(paras), pct)
@@ -68,25 +83,13 @@ func (e *engine) synth(text, voice, lang string, speed float64, progress func(pa
 		if audio == nil {
 			return nil, fmt.Errorf("speech generation failed on paragraph %d", i+1)
 		}
-		if i > 0 {
-			samples = append(samples, pause...)
+		if len(samples) > 0 {
+			samples = append(samples, silence...)
 		}
 		samples = append(samples, audio.Samples...)
 	}
-	return samples, nil
-}
-
-// espeak drops ellipses and glues the words around them ("Wait... really" -> "waitreally"); a comma keeps the pause.
-var ellipsis = strings.NewReplacer("...", ", ", "…", ", ")
-
-func phonemize(text, voice string) [][]int32 {
-	r := pp.Phonemize(ellipsis.Replace(text), voice)
-	defer pp.DeletePhonemizeResult(r)
-	out := make([][]int32, r.GetNumSentences())
-	for s := range out {
-		for _, c := range r.GetPhonemes(s) {
-			out[s] = append(out[s], int32(c))
-		}
+	if len(samples) == 0 {
+		return nil, fmt.Errorf("%w: nothing speakable in the text", errUsage)
 	}
-	return out
+	return samples, nil
 }
