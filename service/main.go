@@ -23,7 +23,8 @@ Usage:
   cat file.txt | clumyap [flags]
   clumyap start [flags]        interactive session, type /help inside
   clumyap update               update to the latest release
-  clumyap -- start             speak the word "start" (same for update)
+  clumyap uninstall            remove clumyap (asks first)
+  clumyap -- start             speak the word "start" (same for update, uninstall)
 
 Flags:
   -o, --output FILE   output .mp3 or .wav, "-" for MP3 on stdout (default clumyap-<time>.mp3)
@@ -65,6 +66,13 @@ func main() {
 	args := os.Args[1:]
 	if len(args) == 1 && args[0] == "update" {
 		if err := runUpdate(); err != nil {
+			fmt.Fprintf(os.Stderr, "clumyap: %v\n", err)
+			os.Exit(1)
+		}
+		return
+	}
+	if len(args) == 1 && args[0] == "uninstall" {
+		if err := runUninstall(os.Stdin); err != nil {
 			fmt.Fprintf(os.Stderr, "clumyap: %v\n", err)
 			os.Exit(1)
 		}

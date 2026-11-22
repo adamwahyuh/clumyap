@@ -99,6 +99,37 @@ jobs:
           grep -q "Already up to date" "$RUNNER_TEMP/update.txt"
           if [ "$RUNNER_OS" = Windows ]; then taskkill //F //IM clumyap.exe >/dev/null 2>&1 || true; else kill %1 2>/dev/null || true; fi
 
+      # Uninstall keeping the models and settings, then install again and remove everything.
+      - name: Uninstall
+        run: |
+          if [ "$RUNNER_OS" = Windows ]; then
+            dir="$(cygpath -u "$LOCALAPPDATA")/Programs/clumyap"; app="$dir/clumyap.exe"
+            archive="$(cygpath -w "$PWD/dist/clumyap-windows-amd64.zip")"
+            install() { CLUMYAP_URL="$archive" powershell -NoProfile -ExecutionPolicy Bypass -File install.ps1; }
+          else
+            dir="$HOME/.local/share/clumyap"; app="$HOME/.local/bin/clumyap"
+            if [ "$RUNNER_OS" = macOS ]; then archive=dist/clumyap-macos-arm64.tar.gz; else archive=$(echo dist/clumyap-linux-*.tar.gz); fi
+            install() { CLUMYAP_URL="file://$PWD/$archive" sh install.sh; }
+          fi
+          gone() {
+            sleep 8 # on Windows a helper deletes the folder once clumyap has exited
+            test ! -e "$dir"
+            if [ "$RUNNER_OS" = Windows ]; then
+              powershell -NoProfile -Command 'if ((([Environment]::GetEnvironmentVariable("Path", "User")) -split ";") -contains (Join-Path $env:LOCALAPPDATA "Programs\clumyap")) { exit 1 }'
+            else
+              test ! -e "$app"
+            fi
+          }
+          printf 'n\n' | "$app" uninstall
+          test -e "$app"
+          printf 'y\nn\n' | "$app" uninstall
+          gone
+          test -d "$HOME/.cache/clumyap/kokoro-multi-lang-v1_0" # models kept
+          install
+          printf 'y\ny\n' | "$app" uninstall
+          gone
+          test ! -e "$HOME/.cache/clumyap/kokoro-multi-lang-v1_0"
+
       - uses: actions/upload-artifact@v7
         with:
           name: ${{ matrix.runner }}

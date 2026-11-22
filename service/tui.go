@@ -33,6 +33,7 @@ var tuiCommands = []struct{ name, args, desc string }{
 	{"config", "", "show saved settings (colored = saved, rest = built-in default)"},
 	{"default", "", "keep the current voice, speed, pauses, lang and model as defaults"},
 	{"update", "", "update clumyap to the latest release"},
+	{"uninstall", "[yes|all]", "remove clumyap (all: also models and settings)"},
 	{"info", "", "about clumyap: version, maker and credits"},
 	{"help", "", "show commands"},
 	{"exit", "", "quit (or Ctrl+C)"},
@@ -419,6 +420,22 @@ func (m *tui) command(line string) tea.Cmd {
 		return tea.Println(helpText())
 	case "info":
 		return tea.Println(infoText())
+	case "uninstall":
+		switch arg {
+		case "":
+			if !installedByScript() {
+				return fail(errUninstallSource)
+			}
+			return say(dim, uninstallSummary()+"\n  /uninstall yes   remove clumyap, keep "+dataSummary()+
+				"\n  /uninstall all   remove clumyap and "+dataSummary())
+		case "yes", "all":
+			m.stop()
+			if err := uninstall(arg == "all"); err != nil {
+				return fail(err)
+			}
+			return tea.Sequence(done(dim.Render("clumyap removed. Bye!")), tea.Quit)
+		}
+		return fail(errors.New("use /uninstall, /uninstall yes or /uninstall all"))
 	case "update":
 		if m.busy != "" {
 			return fail(errors.New("busy (" + m.busy + "), try again in a moment"))

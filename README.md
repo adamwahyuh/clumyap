@@ -31,7 +31,7 @@ Then open a new terminal and run `clumyap start`. The first run downloads the vo
 
 Builds exist for macOS (Apple Silicon, Intel), Linux (x64, arm64) and Windows (x64). Audio playback uses `afplay` on macOS, Windows' built-in player, and `pw-play`, `paplay`, `aplay` or `ffplay` on Linux.
 
-To uninstall: `rm -rf ~/.local/share/clumyap ~/.local/bin/clumyap` (Windows: delete the folder above and remove it from your user PATH).
+To update: `clumyap update` (or `/update` inside `clumyap start`). To uninstall: `clumyap uninstall` (or `/uninstall`); it asks before removing anything and whether to keep the voice models and your settings.
 
 ## Build and install
 
