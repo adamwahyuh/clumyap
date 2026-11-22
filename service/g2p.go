@@ -16,7 +16,8 @@ import (
 // the official lexicon first, espeak-ng for anything else, converted to Kokoro's symbols.
 type g2p struct {
 	lex     map[string]string
-	voice   string // espeak voice
+	user    map[string]string // personal lexicon, lower-case word -> say-as; wins over everything
+	voice   string            // espeak voice
 	british bool
 }
 
@@ -76,7 +77,7 @@ var (
 // sentences returns the paragraph as one phoneme string per sentence.
 func (g *g2p) sentences(text string) []string {
 	var toks []token
-	for _, raw := range strings.Fields(normalizer.Replace(text)) {
+	for _, raw := range strings.Fields(normalizer.Replace(normalizeNumbers(text))) {
 		t := token{raw: raw}
 		t.lead, t.core, t.trail = splitPunct(raw)
 		lower, dotted := strings.ToLower(t.core), strings.HasPrefix(t.trail, ".")
@@ -103,7 +104,9 @@ func (g *g2p) sentences(text string) []string {
 		if strings.ContainsAny(t.trail, nonQuotePunct) {
 			future = fNone
 		}
-		t.ph = reduced(t.core, t.ph, future, g)
+		if _, mine := g.user[strings.ToLower(t.core)]; !mine {
+			t.ph = reduced(t.core, t.ph, future, g)
+		}
 		future = startOf(t.ph, future)
 		if strings.ContainsAny(t.lead, nonQuotePunct) {
 			future = fNone
@@ -276,6 +279,16 @@ func (g *g2p) word(w string) string {
 		return ""
 	}
 	lower := strings.ToLower(w)
+	if say, ok := g.user[lower]; ok {
+		if ph, ok := strings.CutPrefix(say, "/"); ok { // phonemes written by hand
+			return strings.TrimSuffix(ph, "/")
+		}
+		var phs []string
+		for _, part := range strings.Fields(say) { // a respelling: read its words without the personal lexicon
+			phs = append(phs, (&g2p{lex: g.lex, voice: g.voice, british: g.british}).word(part))
+		}
+		return strings.Join(phs, " ")
+	}
 	if ph, ok := g.lex[lower]; ok {
 		return ph
 	}

@@ -40,6 +40,17 @@ clumyap --help                                 # every flag
 
 On macOS, `--play` and the interactive session play audio with the built-in `afplay`.
 
+### Teaching pronunciation
+
+Names and new words can be taught in `~/.config/clumyap/lexicon.txt`, one `word = say as` per line, or with `/pronounce` inside `clumyap start`:
+
+```
+clumyap = clum yap        # a respelling in ordinary words
+adam = /ˈædəm/            # or Kokoro phonemes between slashes
+```
+
+Entries apply to the CLI and the interactive session, and are read fresh on every run.
+
 ## Credits
 
 Made by Adam Wahyu Hariyadi. `/info` inside `clumyap start` shows the same list.

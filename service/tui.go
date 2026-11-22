@@ -25,6 +25,7 @@ var tuiCommands = []struct{ name, args, desc string }{
 	{"sentence-pause", "N", "extra silence after each sentence, 0-3 (0 = natural flow)"},
 	{"lang", "en-us|en-gb", "accent of the pronunciation"},
 	{"model", "[name]", "switch model (no name: list models)"},
+	{"pronounce", "[word = say as]", "teach how to say a word (no args: list, -word: remove)"},
 	{"dir", "[path]", "choose the folder /save writes to (no path: browse, .. goes up)"},
 	{"replay", "", "play the last audio again"},
 	{"stop", "", "stop playback (or Esc)"},
@@ -449,6 +450,8 @@ func (m *tui) command(line string) tea.Cmd {
 			return fail(errors.New("nothing to replay yet"))
 		}
 		return m.play()
+	case "pronounce":
+		return m.pronounce(arg)
 	case "dir":
 		if arg == "" {
 			m.openPicker()

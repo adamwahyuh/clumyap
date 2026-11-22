@@ -77,6 +77,7 @@ func (e *engine) synth(text string, o options, progress func(para, total int, pc
 		}
 		e.g2ps[o.lang] = g
 	}
+	g.user, _ = loadUserLexicon() // read every time so edits apply at once; a missing file is no entries
 	paraSilence := make([]float32, int(float64(e.rate)*o.pause))
 	sentSilence := make([]float32, int(float64(e.rate)*o.sentencePause))
 	var samples []float32
