@@ -250,7 +250,8 @@ func TestPausesCutAtCommas(t *testing.T) {
 }
 
 func TestChatWords(t *testing.T) {
-	g := &g2p{lex: map[string]string{"by": "bˈI", "the": "ði", "way": "wˈA", "are": "ɑɹ", "you": "ju", "ok": "ˌOkˈA",
+	// Every word is in this lexicon: espeak is not initialized unless the model is downloaded (as in CI).
+	g := &g2p{lex: map[string]string{"by": "bˈI", "the": "ði", "way": "wˈA", "are": "ɑɹ", "u": "jˈu", "ok": "ˌOkˈA",
 		"please": "plˈiz", "come": "kˈʌm", "your": "jʊɹ", "turn": "tˈɜɹn", "r": "ˈɑɹ", "and": "ænd", "d": "dˈi", "on": "ɔn"}}
 	for in, want := range map[string]string{
 		"btw r u ok":       "bˈI ðə wˈA ɑɹ jˈu ˌOkˈA",
