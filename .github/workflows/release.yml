@@ -80,8 +80,9 @@ jobs:
             archive="$(cygpath -w "$PWD/dist/clumyap-windows-amd64.zip")"
             install() { CLUMYAP_URL="$archive" powershell -NoProfile -ExecutionPolicy Bypass -File install.ps1; }
             app="$(cygpath -u "$LOCALAPPDATA")/Programs/clumyap/clumyap.exe" ;;
-          *)
-            archive="$(ls dist/clumyap-macos-arm64.tar.gz dist/clumyap-linux-*.tar.gz 2>/dev/null | head -1)"
+          macOS | Linux)
+            # Named per OS: with pipefail a listing that includes a missing file would fail the step.
+            if [ "$RUNNER_OS" = macOS ]; then archive=dist/clumyap-macos-arm64.tar.gz; else archive=$(echo dist/clumyap-linux-*.tar.gz); fi
             install() { CLUMYAP_URL="file://$PWD/$archive" sh install.sh; }
             app="$HOME/.local/bin/clumyap" ;;
           esac
