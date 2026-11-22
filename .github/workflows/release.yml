@@ -1,11 +1,12 @@
 name: build
 
-# Every push to main and every pull request builds, tests and packages clumyap on macOS, Linux and
-# Windows. Pushing a tag like v0.1.0 (matching service/VERSION) also publishes a GitHub release
-# whose files the install scripts download.
+# Every push to any branch and every pull request builds, tests and packages clumyap on macOS,
+# Linux and Windows, so changes can be tried on a branch before they reach main, where the install
+# scripts are served from. Pushing a tag like v0.1.0 (matching service/VERSION) also publishes a
+# GitHub release whose files the install scripts download.
 on:
   push:
-    branches: [main]
+    branches: ["**"]
     tags: ["v*"]
   pull_request:
   workflow_dispatch:
