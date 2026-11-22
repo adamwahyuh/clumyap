@@ -138,19 +138,27 @@ func updateConfig(cfg map[string]string, sets, unsets []string) error {
 }
 
 func printConfig(cfg map[string]string) {
+	fmt.Println(configText(cfg, func(s string) string { return s }))
+}
+
+// configText lists every setting; saved values go through highlight so a UI can tell them from defaults.
+func configText(cfg map[string]string, highlight func(string) string) string {
 	path, _ := configPath()
-	fmt.Println("config file:", path)
+	var b strings.Builder
+	b.WriteString("config file: " + path)
 	for _, k := range settingKeys {
 		v, ok := cfg[k]
 		switch {
 		case ok:
+			v = highlight(v)
 		case k == "output-dir":
 			v = "(default: current folder)"
 		default:
 			v = settingDefaults[k] + " (default)"
 		}
-		fmt.Printf("  %-11s %s\n", k, v)
+		fmt.Fprintf(&b, "\n  %-15s %s", k, v)
 	}
+	return b.String()
 }
 
 type multiFlag []string

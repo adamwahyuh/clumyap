@@ -27,13 +27,19 @@ func TestTUICommands(t *testing.T) {
 	if m.o.voice != "bm_george" || m.o.speed != 1.25 {
 		t.Fatalf("invalid values must not change settings: %+v", m.o)
 	}
-	for _, c := range []string{"/save", "/replay", "/bogus", "/help", "/voice", "/model", "/speed"} {
+	for _, c := range []string{"/save", "/replay", "/bogus", "/help", "/voice", "/model", "/speed", "/config"} {
 		if m.command(c) == nil {
 			t.Errorf("%s: want a message", c)
 		}
 	}
 
+	if txt := configText(m.o.cfg, func(s string) string { return "[" + s + "]" }); !strings.Contains(txt, "voice           af_heart (default)") {
+		t.Errorf("before /default, voice should show as default:\n%s", txt)
+	}
 	m.command("/default")
+	if txt := configText(m.o.cfg, func(s string) string { return "[" + s + "]" }); !strings.Contains(txt, "voice           [bm_george]") || !strings.Contains(txt, "sentence-pause  [0.4]") {
+		t.Errorf("after /default, saved values should be highlighted:\n%s", txt)
+	}
 	cfg, _ := loadConfig()
 	if cfg["voice"] != "bm_george" || cfg["speed"] != "1.25" || cfg["lang"] != "en-gb" || cfg["sentence-pause"] != "0.4" {
 		t.Fatalf("/default not saved: %v", cfg)

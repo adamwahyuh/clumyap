@@ -27,6 +27,7 @@ var tuiCommands = []struct{ name, args, desc string }{
 	{"replay", "", "play the last audio again"},
 	{"stop", "", "stop playback (or Esc)"},
 	{"save", "[file]", "save the last audio (.mp3/.wav, default: output-dir)"},
+	{"config", "", "show saved settings (colored = saved, rest = built-in default)"},
 	{"default", "", "keep the current voice, speed, pauses, lang and model as defaults"},
 	{"help", "", "show commands"},
 	{"exit", "", "quit (or Ctrl+C)"},
@@ -316,6 +317,8 @@ func (m *tui) command(line string) tea.Cmd {
 			return m.load(val)
 		}
 		return done(dim.Render(name+" → ") + pink.Render(val))
+	case "config":
+		return tea.Println(configText(m.o.cfg, func(s string) string { return pink.Render(s) }))
 	case "replay":
 		if m.last == nil {
 			return fail(errors.New("nothing to replay yet"))
