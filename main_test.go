@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"errors"
 	"reflect"
+	"strings"
 	"testing"
 )
 
@@ -11,6 +12,13 @@ func TestParseArgs(t *testing.T) {
 	o, err := parseArgs([]string{"Hello", "world", "-o", "a.wav", "-v", "am_michael", "--speed", "1.2"})
 	if err != nil || o.text != "Hello world" || o.output != "a.wav" || o.voice != "am_michael" || o.speed != 1.2 {
 		t.Fatalf("got %+v, %v", o, err)
+	}
+	t.Setenv("CLUMYAP_OUTPUT_DIR", "/tmp/out")
+	if o, _ := parseArgs([]string{"hi"}); !strings.HasPrefix(o.output, "/tmp/out/clumyap-") {
+		t.Errorf("output dir not applied: %s", o.output)
+	}
+	if o, _ := parseArgs([]string{"hi", "-o", "x.mp3"}); o.output != "x.mp3" {
+		t.Errorf("-o must win over CLUMYAP_OUTPUT_DIR: %s", o.output)
 	}
 	for _, bad := range [][]string{
 		{"hi", "-s", "3"},

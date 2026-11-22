@@ -38,6 +38,7 @@ Flags:
 
 Env:
   CLUMYAP_MODEL_DIR   model folder (default ~/.cache/clumyap)
+  CLUMYAP_OUTPUT_DIR  folder for the auto-named output when -o is not given (default: current folder)
 `
 
 type options struct {
@@ -123,7 +124,7 @@ func parseArgs(args []string) (options, error) {
 		return o, fmt.Errorf("%w: --play cannot be used with -o -", errUsage)
 	}
 	if o.output == "" {
-		o.output = "clumyap-" + time.Now().Format("20060102-150405") + ".mp3"
+		o.output = filepath.Join(os.Getenv("CLUMYAP_OUTPUT_DIR"), "clumyap-"+time.Now().Format("20060102-150405")+".mp3")
 	}
 	if ext := strings.ToLower(filepath.Ext(o.output)); o.output != "-" && ext != ".mp3" && ext != ".wav" {
 		return o, fmt.Errorf("%w: output must end in .mp3 or .wav", errUsage)
@@ -247,6 +248,9 @@ func phonemize(text, voice string) [][]int32 {
 }
 
 func writeFile(path string, samples []float32, rate int) error {
+	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+		return err
+	}
 	f, err := os.Create(path)
 	if err != nil {
 		return err
