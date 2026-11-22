@@ -142,3 +142,21 @@ func TestNormalize(t *testing.T) {
 		t.Errorf("gain above +12 dB: %.1f dBFS", got)
 	}
 }
+
+func TestUpdateHelpers(t *testing.T) {
+	for _, c := range []struct {
+		a, b string
+		want bool
+	}{{"0.2.0", "0.1.0", true}, {"0.10.0", "0.9.3", true}, {"1.0", "0.99.99", true}, {"0.1.0", "0.1.0", false}, {"0.1.0", "0.2.0", false}, {"0.1.1", "0.1", true}} {
+		if got := newer(c.a, c.b); got != c.want {
+			t.Errorf("newer(%q, %q) = %v", c.a, c.b, got)
+		}
+	}
+	// The test binary lives in a temp build folder, not in the install folder.
+	if installedByScript() {
+		t.Error("a test binary should not count as installed by the script")
+	}
+	if _, err := checkUpdate(); !errors.Is(err, errFromSource) {
+		t.Errorf("a build from source must refuse to update, got %v", err)
+	}
+}

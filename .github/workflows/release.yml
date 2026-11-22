@@ -71,6 +71,33 @@ jobs:
           "$app" -q "Hello from GitHub Actions. It costs 4 dollars in 2026." -o smoke/hello.wav
           test "$(wc -c < smoke/hello.wav)" -gt 100000
 
+      # Install from the archive just built, then install again while clumyap is running, which is what
+      # `clumyap update` and /update do. On Windows the running files are locked, so this is the real test.
+      - name: Install, then update while running
+        run: |
+          case "$RUNNER_OS" in
+          Windows)
+            archive="$(cygpath -w "$PWD/dist/clumyap-windows-amd64.zip")"
+            install() { CLUMYAP_URL="$archive" powershell -NoProfile -ExecutionPolicy Bypass -File install.ps1; }
+            app="$(cygpath -u "$LOCALAPPDATA")/Programs/clumyap/clumyap.exe" ;;
+          *)
+            archive="$(ls dist/clumyap-macos-arm64.tar.gz dist/clumyap-linux-*.tar.gz 2>/dev/null | head -1)"
+            install() { CLUMYAP_URL="file://$PWD/$archive" sh install.sh; }
+            app="$HOME/.local/bin/clumyap" ;;
+          esac
+          install
+          "$app" --version
+          # Reads stdin until it closes, so it stays running (files open) during the second install.
+          sleep 90 | "$app" -q -o "$RUNNER_TEMP/held.wav" &
+          sleep 5
+          install
+          "$app" --version
+          "$app" -q "Updated while running." -o "$RUNNER_TEMP/after.wav"
+          # The installed copy recognises itself and asks GitHub; the latest release is never newer than this build.
+          "$app" update | tee "$RUNNER_TEMP/update.txt"
+          grep -q "Already up to date" "$RUNNER_TEMP/update.txt"
+          if [ "$RUNNER_OS" = Windows ]; then taskkill //F //IM clumyap.exe >/dev/null 2>&1 || true; else kill %1 2>/dev/null || true; fi
+
       - uses: actions/upload-artifact@v7
         with:
           name: ${{ matrix.runner }}

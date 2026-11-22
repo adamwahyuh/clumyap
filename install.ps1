@@ -14,13 +14,23 @@ New-Item -ItemType Directory -Path $tmp | Out-Null
 
 try {
     Write-Host "Downloading clumyap for Windows..."
-    Invoke-WebRequest -Uri $url -OutFile "$tmp\clumyap.zip" -UseBasicParsing
+    if (Test-Path -LiteralPath $url) {
+        Copy-Item -LiteralPath $url -Destination "$tmp\clumyap.zip" # a local archive, used by the tests
+    } else {
+        Invoke-WebRequest -Uri $url -OutFile "$tmp\clumyap.zip" -UseBasicParsing
+    }
     Expand-Archive -Path "$tmp\clumyap.zip" -DestinationPath $tmp -Force
     if (-not (Test-Path "$tmp\clumyap\clumyap.exe")) { throw "the download is not a clumyap archive" }
 
-    New-Item -ItemType Directory -Path (Split-Path $dir) -Force | Out-Null
-    if (Test-Path $dir) { Remove-Item -Path $dir -Recurse -Force }
-    Move-Item -Path "$tmp\clumyap" -Destination $dir
+    # A running clumyap (as during /update) keeps its .exe and .dll files locked: Windows will not
+    # delete or overwrite them, but it does allow renaming. So old files are moved aside and new ones
+    # copied in; the leftovers are removed on the next install, once nothing uses them.
+    New-Item -ItemType Directory -Path $dir -Force | Out-Null
+    Get-ChildItem -Path $dir -Filter '*.old' | Remove-Item -Force -ErrorAction SilentlyContinue
+    Get-ChildItem -Path $dir -File | Where-Object { $_.Extension -ne '.old' } | ForEach-Object {
+        Rename-Item -LiteralPath $_.FullName -NewName ("{0}.{1}.old" -f $_.Name, [guid]::NewGuid().ToString('N').Substring(0, 8))
+    }
+    Copy-Item -Path "$tmp\clumyap\*" -Destination $dir -Recurse -Force
 } finally {
     Remove-Item -Path $tmp -Recurse -Force -ErrorAction SilentlyContinue
 }

@@ -22,7 +22,8 @@ Usage:
   clumyap -f file.txt [flags]
   cat file.txt | clumyap [flags]
   clumyap start [flags]        interactive session, type /help inside
-  clumyap -- start             speak the word "start"
+  clumyap update               update to the latest release
+  clumyap -- start             speak the word "start" (same for update)
 
 Flags:
   -o, --output FILE   output .mp3 or .wav, "-" for MP3 on stdout (default clumyap-<time>.mp3)
@@ -62,6 +63,13 @@ var errUsage = errors.New("usage")
 
 func main() {
 	args := os.Args[1:]
+	if len(args) == 1 && args[0] == "update" {
+		if err := runUpdate(); err != nil {
+			fmt.Fprintf(os.Stderr, "clumyap: %v\n", err)
+			os.Exit(1)
+		}
+		return
+	}
 	start := len(args) > 0 && args[0] == "start"
 	if start {
 		args = args[1:]

@@ -32,6 +32,7 @@ var tuiCommands = []struct{ name, args, desc string }{
 	{"save", "[file]", "save the last audio (.mp3/.wav, default: output-dir)"},
 	{"config", "", "show saved settings (colored = saved, rest = built-in default)"},
 	{"default", "", "keep the current voice, speed, pauses, lang and model as defaults"},
+	{"update", "", "update clumyap to the latest release"},
 	{"info", "", "about clumyap: version, maker and credits"},
 	{"help", "", "show commands"},
 	{"exit", "", "quit (or Ctrl+C)"},
@@ -128,6 +129,10 @@ type (
 		pct         float32
 	}
 	playDoneMsg struct{ cmd *exec.Cmd }
+	updateMsg   struct {
+		latest string // "" when already current
+		err    error
+	}
 )
 
 // tui is the `clumyap start` session. Settings changed here last for the session; /default saves them.
@@ -346,6 +351,15 @@ func (m *tui) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.last = msg.samples
 		secs := float64(len(msg.samples)) / float64(m.eng.rate)
 		return m, tea.Batch(done(amber.Render(fmt.Sprintf("%.1fs", secs))+dim.Render(" audio · made in ")+amber.Render(fmt.Sprintf("%.1fs", msg.took.Seconds()))), m.play())
+	case updateMsg:
+		m.busy = ""
+		switch {
+		case msg.err != nil:
+			return m, fail(msg.err)
+		case msg.latest == "":
+			return m, done(dim.Render("clumyap ") + version() + dim.Render(" is the latest version"))
+		}
+		return m, done(dim.Render("updated to ") + green.Render(msg.latest) + dim.Render(". Restart clumyap (/exit) to use it."))
 	case playDoneMsg:
 		if m.player == msg.cmd {
 			m.player = nil
@@ -404,6 +418,22 @@ func (m *tui) command(line string) tea.Cmd {
 		return tea.Println(helpText())
 	case "info":
 		return tea.Println(infoText())
+	case "update":
+		if m.busy != "" {
+			return fail(errors.New("busy (" + m.busy + "), try again in a moment"))
+		}
+		m.busy = "checking for updates"
+		return tea.Batch(m.spin.Tick, func() tea.Msg {
+			latest, err := checkUpdate()
+			if err != nil || latest == "" {
+				return updateMsg{latest, err}
+			}
+			// The script's output would scribble over the TUI, so it is captured and shown only on failure.
+			if out, err := installerCommand().CombinedOutput(); err != nil {
+				return updateMsg{err: fmt.Errorf("update failed: %v\n%s", err, strings.TrimSpace(string(out)))}
+			}
+			return updateMsg{latest: latest}
+		})
 	case "exit", "quit":
 		return tea.Quit
 	case "stop":
