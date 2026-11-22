@@ -6,6 +6,7 @@ import (
 	"path/filepath"
 	"regexp"
 	"strings"
+	"unicode"
 	"unicode/utf8"
 
 	pp "github.com/csukuangfj/piper-phonemize-go/piper_phonemize"
@@ -46,29 +47,86 @@ func newG2P(modelDir, lang string) (*g2p, error) {
 const punct = `;:,.!?—…"()“”`
 
 var (
-	normalizer = strings.NewReplacer("’", "'", "‘", "'", "...", " … ", "…", " … ", "—", " — ", " - ", " — ", " – ", " — ")
-	sentEnd    = regexp.MustCompile(`[.!?…]["”)]*$`)
-	syllabic   = regexp.MustCompile(`(\S)\x{0329}`)
+	normalizer    = strings.NewReplacer("’", "'", "‘", "'", "...", " … ", "…", " … ", "—", " — ", " - ", " — ", " – ", " — ")
+	sentEnd       = regexp.MustCompile(`[.!?…]["”)]*$`)
+	initialism    = regexp.MustCompile(`^(?:[A-Za-z]{1,2}\.)+[A-Za-z]{1,2}$`) // "p.m", "e.g", "U.S" (trailing dot already split off)
+	singleInitial = regexp.MustCompile(`^[A-Z]$`)
+	syllabic      = regexp.MustCompile(`(\S)\x{0329}`)
 )
 
 // chunks returns the paragraph as phoneme strings of at most maxChunk runes, split at sentence ends when possible.
 func (g *g2p) chunks(text string) []string { return pack(g.sentences(text)) }
 
+type token struct {
+	raw               string // as written
+	lead, core, trail string // punctuation before, the word, punctuation after
+	abbrev            bool   // core was written as an abbreviation ("Dr.", "p.m.", "J.")
+	title             bool   // an abbreviation that always precedes a name ("Dr.", "Mr.")
+	ph                string // phonemes of core
+}
+
+// Abbreviations read in full. Titles never end a sentence: they always precede a name.
+var (
+	titleAbbrevs = map[string]string{"dr": "doctor", "mr": "mister", "mrs": "missus", "ms": "miz", "prof": "professor", "jr": "junior", "sr": "senior"}
+	otherAbbrevs = map[string]string{"vs": "versus", "etc": "et cetera", "approx": "approximately", "dept": "department", "fig": "figure",
+		"jan": "january", "feb": "february", "apr": "april", "jun": "june", "jul": "july", "aug": "august",
+		"sep": "september", "sept": "september", "oct": "october", "nov": "november", "dec": "december"}
+)
+
 // sentences returns the paragraph as one phoneme string per sentence.
 func (g *g2p) sentences(text string) []string {
+	var toks []token
+	for _, raw := range strings.Fields(normalizer.Replace(text)) {
+		t := token{raw: raw}
+		t.lead, t.core, t.trail = splitPunct(raw)
+		lower, dotted := strings.ToLower(t.core), strings.HasPrefix(t.trail, ".")
+		switch {
+		case dotted && titleAbbrevs[lower] != "":
+			t.core, t.abbrev, t.title = titleAbbrevs[lower], true, true
+		case otherAbbrevs[lower] != "" && (dotted || lower == "vs"):
+			t.core, t.abbrev = otherAbbrevs[lower], true
+		case dotted && (initialism.MatchString(t.core) || singleInitial.MatchString(t.core)):
+			t.abbrev = true // "p.m.", "e.g.", "U.S.", "J."
+		}
+		toks = append(toks, t)
+	}
+
+	// Right to left, so each word knows how the next one starts (misaki's future_vowel).
+	future := fNone
+	for i := len(toks) - 1; i >= 0; i-- {
+		t := &toks[i]
+		var parts []string
+		for _, w := range strings.Fields(t.core) {
+			parts = append(parts, g.word(w))
+		}
+		t.ph = strings.Join(parts, " ")
+		if strings.ContainsAny(t.trail, nonQuotePunct) {
+			future = fNone
+		}
+		t.ph = reduced(t.core, t.ph, future, g)
+		future = startOf(t.ph, future)
+		if strings.ContainsAny(t.lead, nonQuotePunct) {
+			future = fNone
+		}
+	}
+
 	var sentences []string
 	var cur []string
-	for _, tok := range strings.Fields(normalizer.Replace(text)) {
-		lead, core, trail := splitPunct(tok)
-		ph := keepPunct(lead) + g.word(core) + keepPunct(trail)
+	for i, t := range toks {
+		trail := t.trail
+		end := sentEnd.MatchString(t.raw)
+		if end && strings.HasPrefix(trail, ".") && !strings.HasPrefix(trail, "…") && i+1 < len(toks) && continues(t, toks[i+1]) {
+			end, trail = false, trail[1:] // "Dr. Smith", "p.m. on": the dot is not a full stop
+		}
+		ph := keepPunct(t.lead) + t.ph + keepPunct(trail)
 		switch {
 		case ph == "":
-		case core == "" && len(cur) > 0 && (strings.ContainsAny(ph[:1], `;:,.!?"”)`) || strings.HasPrefix(ph, "…")):
+		case t.core == "" && len(cur) > 0 && (strings.ContainsAny(ph[:1], `;:,.!?"”)`) || strings.HasPrefix(ph, "…")):
 			cur[len(cur)-1] += ph // closing punctuation sticks to the previous word: "jˈɛs, aɪ"; dashes stay spaced
 		default:
 			cur = append(cur, ph)
 		}
-		if sentEnd.MatchString(tok) && len(cur) > 0 {
+		if end && len(cur) > 0 {
 			sentences = append(sentences, strings.Join(cur, " "))
 			cur = nil
 		}
@@ -77,6 +135,93 @@ func (g *g2p) sentences(text string) []string {
 		sentences = append(sentences, strings.Join(cur, " "))
 	}
 	return sentences
+}
+
+// continues reports whether the sentence goes on after t's trailing dot.
+func continues(t, next token) bool {
+	r, _ := utf8.DecodeRuneInString(strings.TrimLeft(next.lead+next.core, punct))
+	switch {
+	case unicode.IsLower(r):
+		return true // nothing starts a sentence in lower case: "approx. five", "p.m. on"
+	case t.title:
+		return true // "Dr. Smith"
+	case t.abbrev:
+		return unicode.IsDigit(r) || singleInitialCore(t) // "Jan. 5th", "J. K. Rowling"
+	}
+	return false
+}
+
+func singleInitialCore(t token) bool { return singleInitial.MatchString(t.core) }
+
+// future describes how the next word starts, as misaki tracks it.
+type futureKind int
+
+const (
+	fNone futureKind = iota // punctuation or end of text follows
+	fVowel
+	fConsonant
+)
+
+const (
+	kokoroVowels     = "AIOQWYaiuæɑɒɔəɛɜɪʊʌᵻ"
+	kokoroConsonants = "bdfhjklmnpstvwzðŋɡɹɾʃʒʤʧθ"
+	nonQuotePunct    = ";:,.!?—…"
+)
+
+func startOf(ph string, otherwise futureKind) futureKind {
+	for _, r := range ph {
+		switch {
+		case strings.ContainsRune(kokoroVowels, r):
+			return fVowel
+		case strings.ContainsRune(kokoroConsonants, r):
+			return fConsonant
+		case strings.ContainsRune(nonQuotePunct, r):
+			return fNone
+		}
+	}
+	return otherwise
+}
+
+// reduced gives the weak forms native speakers use for short function words (misaki's get_special_case);
+// the lexicon alone always has the stressed form ("the" as "thee", "a" as "ay").
+func reduced(word, ph string, next futureKind, g *g2p) string {
+	switch word {
+	case "the", "The":
+		if next == fVowel {
+			return "ði"
+		}
+		return "ðə"
+	case "a":
+		return "ɐ"
+	case "A":
+		if next == fNone {
+			return "ˈA" // the letter, as in "plan A."
+		}
+		return "ɐ"
+	case "an", "An":
+		return "ɐn"
+	case "am", "Am":
+		if next == fNone {
+			return ph
+		}
+		return "ɐm"
+	case "I":
+		return "ˌI"
+	case "to", "To":
+		switch next {
+		case fVowel:
+			return "tʊ"
+		case fConsonant:
+			return "tə"
+		}
+		return ph
+	case "in", "In":
+		if next == fNone {
+			return "ˈɪn"
+		}
+		return "ɪn"
+	}
+	return ph
 }
 
 // pack joins sentences into strings of at most maxChunk runes; an over-long sentence is split between words.

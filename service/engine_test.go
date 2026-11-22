@@ -30,7 +30,7 @@ func TestToKokoro(t *testing.T) {
 
 func TestChunks(t *testing.T) {
 	g := &g2p{lex: map[string]string{"yes": "jˈɛs", "i": "ˈI", "did": "dˈɪd", "it": "ɪt", "wait": "wˈAt", "really": "ɹˈiᵊli", "well-known": "wˈɛlnˈOn"}}
-	if got := g.chunks(`Yes, I did it! "Wait... really?"`); len(got) != 1 || got[0] != `jˈɛs, ˈI dˈɪd ɪt! "wˈAt… ɹˈiᵊli?"` {
+	if got := g.chunks(`Yes, I did it! "Wait... really?"`); len(got) != 1 || got[0] != `jˈɛs, ˌI dˈɪd ɪt! "wˈAt… ɹˈiᵊli?"` {
 		t.Fatalf("got %q", got)
 	}
 	if got := g.chunks("Well-known — yes."); got[0] != "wˈɛlnˈOn — jˈɛs." {
@@ -143,4 +143,52 @@ func silentGaps(s []float32, rate int) []float64 {
 		run = 0
 	}
 	return out
+}
+
+func TestNaturalReading(t *testing.T) {
+	home, _ := os.UserHomeDir()
+	dir := filepath.Join(home, ".cache/clumyap", models[0].name)
+	if _, err := os.Stat(filepath.Join(dir, "lexicon-us-en.txt")); err != nil {
+		t.Skip("model not downloaded")
+	}
+	pp.Initialize(filepath.Join(dir, "espeak-ng-data"))
+	g, err := newG2P(dir, "en-us")
+	if err != nil {
+		t.Fatal(err)
+	}
+	cases := []struct {
+		text      string
+		sentences int
+		has       []string
+		hasNot    []string
+	}{
+		// Weak forms: "the" is "thuh" before a consonant and "thee" before a vowel; "a"/"an" are "uh"/"un".
+		{"The cat ate the apple. A dog and an owl.", 2, []string{"ðə kˈæt", "ði ˈæpᵊl", "ɐ dˈɔɡ", "ɐn ˈWl"}, []string{"ði kˈæt", "A dˈɔɡ"}},
+		{"I want to go to Oslo. I am here.", 2, []string{"ˌI wˈɑnt", "tə ɡ", "tʊ ˈɑ", "ɐm hˈɪɹ"}, nil},
+		{"Plan A.", 1, []string{"ˈA."}, nil},
+		// Abbreviations read in full and do not end the sentence.
+		{"Dr. Smith met Mr. Jones at 3:30 p.m. on Jan. 5th.", 1, []string{"dˈɑktəɹ smˈɪθ", "mˈɪstəɹ ʤˈOnz", "ʤˈænjə"}, []string{"dˈɑktəɹ.", "mˈɪstəɹ."}},
+		{"Red vs. blue, e.g. this one.", 1, []string{"vˈɜɹsəs blˈu"}, nil},
+		{"J. K. Rowling wrote it.", 1, nil, nil},
+		// A real full stop after an abbreviation-like word still ends the sentence.
+		{"We met in Jan. Then it rained.", 2, nil, nil},
+		{"Apples, pears, etc. Then lunch.", 2, nil, nil},
+	}
+	for _, c := range cases {
+		got := g.sentences(c.text)
+		all := strings.Join(got, " | ")
+		if len(got) != c.sentences {
+			t.Errorf("%q: %d sentences, want %d: %s", c.text, len(got), c.sentences, all)
+		}
+		for _, w := range c.has {
+			if !strings.Contains(all, w) {
+				t.Errorf("%q: missing %q in %s", c.text, w, all)
+			}
+		}
+		for _, w := range c.hasNot {
+			if strings.Contains(all, w) {
+				t.Errorf("%q: should not contain %q: %s", c.text, w, all)
+			}
+		}
+	}
 }
