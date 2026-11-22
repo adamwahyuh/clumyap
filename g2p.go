@@ -52,7 +52,10 @@ var (
 )
 
 // chunks returns the paragraph as phoneme strings of at most maxChunk runes, split at sentence ends when possible.
-func (g *g2p) chunks(text string) []string {
+func (g *g2p) chunks(text string) []string { return pack(g.sentences(text)) }
+
+// sentences returns the paragraph as one phoneme string per sentence.
+func (g *g2p) sentences(text string) []string {
 	var sentences []string
 	var cur []string
 	for _, tok := range strings.Fields(normalizer.Replace(text)) {
@@ -73,7 +76,11 @@ func (g *g2p) chunks(text string) []string {
 	if len(cur) > 0 {
 		sentences = append(sentences, strings.Join(cur, " "))
 	}
+	return sentences
+}
 
+// pack joins sentences into strings of at most maxChunk runes; an over-long sentence is split between words.
+func pack(sentences []string) []string {
 	var out []string
 	chunk := ""
 	flush := func() {

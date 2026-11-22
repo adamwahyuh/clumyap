@@ -48,45 +48,80 @@ func loadEngine(m model) (*engine, error) {
 
 func (e *engine) close() { sherpa.DeleteOfflineTts(e.tts) }
 
-// synth speaks text (split into paragraphs, pause seconds of silence between them) and returns
-// mono float samples at e.rate. progress may be nil.
-func (e *engine) synth(text, voice, lang string, speed, pause float64, progress func(para, total int, pct float32)) ([]float32, error) {
+// trimSilence cuts near-silent samples from both ends, keeping 40 ms so word onsets and tails are not clipped.
+func trimSilence(s []float32, rate int) []float32 {
+	const threshold = 0.01
+	keep := rate * 40 / 1000
+	start, end := 0, len(s)
+	for start < end && s[start] < threshold && s[start] > -threshold {
+		start++
+	}
+	for end > start && s[end-1] < threshold && s[end-1] > -threshold {
+		end--
+	}
+	return s[max(0, start-keep):min(len(s), end+keep)]
+}
+
+// synth speaks text with o's voice, lang, speed, pause (between paragraphs) and sentencePause,
+// returning mono float samples at e.rate. progress may be nil.
+func (e *engine) synth(text string, o options, progress func(para, total int, pct float32)) ([]float32, error) {
 	paras := paragraphs(text)
 	if len(paras) == 0 {
 		return nil, fmt.Errorf("%w: text is empty", errUsage)
 	}
-	g, ok := e.g2ps[lang]
+	g, ok := e.g2ps[o.lang]
 	if !ok {
 		var err error
-		if g, err = newG2P(e.dir, lang); err != nil {
+		if g, err = newG2P(e.dir, o.lang); err != nil {
 			return nil, fmt.Errorf("load lexicon: %w", err)
 		}
-		e.g2ps[lang] = g
+		e.g2ps[o.lang] = g
 	}
-	silence := make([]float32, int(float64(e.rate)*pause))
+	paraSilence := make([]float32, int(float64(e.rate)*o.pause))
+	sentSilence := make([]float32, int(float64(e.rate)*o.sentencePause))
 	var samples []float32
 	for i, p := range paras {
-		var codepoints [][]int32
-		for _, c := range g.chunks(p) {
-			codepoints = append(codepoints, []int32(c))
-		}
-		if len(codepoints) == 0 {
-			continue
-		}
-		gen := &sherpa.GenerationConfig{Sid: voiceID(voice), Speed: float32(speed), PhonemeCodepoints: codepoints}
-		audio := e.tts.GenerateWithConfig(p, gen, func(_ []float32, pct float32) bool {
-			if progress != nil {
-				progress(i+1, len(paras), pct)
+		// By default a paragraph is one model call so intonation flows across sentences;
+		// with a sentence pause each sentence is its own call so silence can go between them.
+		units := [][]string{g.chunks(p)}
+		if o.sentencePause > 0 {
+			units = nil
+			for _, s := range g.sentences(p) {
+				units = append(units, pack([]string{s}))
 			}
-			return true
-		})
-		if audio == nil {
-			return nil, fmt.Errorf("speech generation failed on paragraph %d", i+1)
 		}
-		if len(samples) > 0 {
-			samples = append(samples, silence...)
+		for j, unit := range units {
+			if len(unit) == 0 {
+				continue
+			}
+			var codepoints [][]int32
+			for _, c := range unit {
+				codepoints = append(codepoints, []int32(c))
+			}
+			gen := &sherpa.GenerationConfig{Sid: voiceID(o.voice), Speed: float32(o.speed), PhonemeCodepoints: codepoints}
+			audio := e.tts.GenerateWithConfig(p, gen, func(_ []float32, pct float32) bool {
+				if progress != nil {
+					progress(i+1, len(paras), (float32(j)+pct)/float32(len(units)))
+				}
+				return true
+			})
+			if audio == nil {
+				return nil, fmt.Errorf("speech generation failed on paragraph %d", i+1)
+			}
+			out := audio.Samples
+			if o.sentencePause > 0 {
+				// Each call pads its own silence at both ends; trim it so the gap is what was asked for.
+				out = trimSilence(out, e.rate)
+			}
+			switch {
+			case len(samples) == 0:
+			case j == 0:
+				samples = append(samples, paraSilence...)
+			default:
+				samples = append(samples, sentSilence...)
+			}
+			samples = append(samples, out...)
 		}
-		samples = append(samples, audio.Samples...)
 	}
 	if len(samples) == 0 {
 		return nil, fmt.Errorf("%w: nothing speakable in the text", errUsage)

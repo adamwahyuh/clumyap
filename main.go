@@ -31,6 +31,7 @@ Flags:
   -v, --voice NAME    voice, e.g. af_sarah or just sarah (default af_heart), see --voices
   -s, --speed N       speed 0.5-2.0 (default 1.0)
       --pause N       seconds of silence between paragraphs, 0-3 (default 0.6)
+      --sentence-pause N  extra silence after each sentence, 0-3 (default 0 = natural flow)
   -l, --lang LANG     en-us or en-gb (default en-us)
   -m, --model NAME    model (default kokoro-multi-lang-v1_0), see --models
       --play          play the result when done
@@ -40,7 +41,7 @@ Flags:
 
 Settings (saved defaults, a flag always wins):
       --config        show settings
-      --set KEY=VALUE save a default, repeatable: voice, model, speed, pause, lang, output-dir
+      --set KEY=VALUE save a default, repeatable: voice, model, speed, pause, sentence-pause, lang, output-dir
       --unset KEY     back to the built-in default, repeatable
   e.g. clumyap --set voice=bella --set output-dir=~/Music/clumyap
 
@@ -50,7 +51,7 @@ Env:
 
 type options struct {
 	text, output, file, voice, lang, model        string
-	speed, pause                                  float64
+	speed, pause, sentencePause                   float64
 	play, listVoices, listModels, quiet, showConf bool
 	sets, unsets                                  multiFlag
 	cfg                                           map[string]string
@@ -97,6 +98,7 @@ func parseArgs(args []string, cfg map[string]string) (options, error) {
 	// Saved speed was validated on load, so this parse cannot fail.
 	defaultSpeed, _ := strconv.ParseFloat(setting("speed"), 64)
 	defaultPause, _ := strconv.ParseFloat(setting("pause"), 64)
+	defaultSentencePause, _ := strconv.ParseFloat(setting("sentence-pause"), 64)
 	fs := flag.NewFlagSet("clumyap", flag.ContinueOnError)
 	fs.SetOutput(io.Discard)
 	for _, n := range []string{"o", "output"} {
@@ -112,6 +114,7 @@ func parseArgs(args []string, cfg map[string]string) (options, error) {
 		fs.Float64Var(&o.speed, n, defaultSpeed, "")
 	}
 	fs.Float64Var(&o.pause, "pause", defaultPause, "")
+	fs.Float64Var(&o.sentencePause, "sentence-pause", defaultSentencePause, "")
 	for _, n := range []string{"l", "lang"} {
 		fs.StringVar(&o.lang, n, setting("lang"), "")
 	}
@@ -156,6 +159,8 @@ func parseArgs(args []string, cfg map[string]string) (options, error) {
 		return o, fmt.Errorf("%w: --speed must be between 0.5 and 2.0", errUsage)
 	case o.pause < 0 || o.pause > 3:
 		return o, fmt.Errorf("%w: --pause must be between 0 and 3 seconds", errUsage)
+	case o.sentencePause < 0 || o.sentencePause > 3:
+		return o, fmt.Errorf("%w: --sentence-pause must be between 0 and 3 seconds", errUsage)
 	case o.lang != "en-us" && o.lang != "en-gb":
 		return o, fmt.Errorf("%w: --lang must be en-us or en-gb", errUsage)
 	case voiceID(o.voice) < 0:
@@ -246,7 +251,7 @@ func run(o options) error {
 		return err
 	}
 	defer e.close()
-	samples, err := e.synth(text, o.voice, o.lang, o.speed, o.pause, func(i, n int, pct float32) {
+	samples, err := e.synth(text, o, func(i, n int, pct float32) {
 		logf(o.quiet, "\r  [%d/%d] %3.0f%%", i, n, pct*100)
 	})
 	if err != nil {

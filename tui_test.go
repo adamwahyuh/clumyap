@@ -18,7 +18,8 @@ func TestTUICommands(t *testing.T) {
 	m.command("/voice George")
 	m.command("/speed 1.25")
 	m.command("/lang en-gb")
-	if m.o.voice != "bm_george" || m.o.speed != 1.25 || m.o.lang != "en-gb" {
+	m.command("/sentence-pause 0.4")
+	if m.o.voice != "bm_george" || m.o.speed != 1.25 || m.o.lang != "en-gb" || m.o.sentencePause != 0.4 {
 		t.Fatalf("settings not applied: %+v", m.o)
 	}
 	m.command("/voice nobody")
@@ -34,7 +35,7 @@ func TestTUICommands(t *testing.T) {
 
 	m.command("/default")
 	cfg, _ := loadConfig()
-	if cfg["voice"] != "bm_george" || cfg["speed"] != "1.25" || cfg["lang"] != "en-gb" {
+	if cfg["voice"] != "bm_george" || cfg["speed"] != "1.25" || cfg["lang"] != "en-gb" || cfg["sentence-pause"] != "0.4" {
 		t.Fatalf("/default not saved: %v", cfg)
 	}
 

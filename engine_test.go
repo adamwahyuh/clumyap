@@ -90,3 +90,57 @@ func TestG2PWithModel(t *testing.T) {
 		}
 	}
 }
+
+func TestSentencePause(t *testing.T) {
+	if !modelInstalled(models[0]) {
+		t.Skip("model not downloaded")
+	}
+	e, err := loadEngine(models[0])
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer e.close()
+	o, _ := parseArgs(nil, map[string]string{})
+	text := "Hello there. How are you? I am fine."
+	flow, err := e.synth(text, o, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	o.sentencePause = 1
+	paused, err := e.synth(text, o, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	// Three sentences give two gaps of the asked 1 s (plus the 2x40 ms trim margins); flowing speech has none that long.
+	if g := silentGaps(flow, e.rate); len(g) != 0 {
+		t.Errorf("flowing speech should have no long gaps, got %v", g)
+	}
+	g := silentGaps(paused, e.rate)
+	if len(g) != 2 || g[0] < 1 || g[0] > 1.15 || g[1] < 1 || g[1] > 1.15 {
+		t.Fatalf("want two ~1s gaps, got %v", g)
+	}
+	if got := trimSilence([]float32{0, 0, 0.5, 0, 0}, 1000); len(got) != 5 {
+		t.Fatalf("trim must keep a margin: %v", got)
+	}
+	if got := trimSilence(make([]float32, 1000), 1000); len(got) > 80 {
+		t.Fatalf("all-silent input should shrink to the margin, got %d samples", len(got))
+	}
+	t.Logf("flow %.2fs, with 1s sentence pause %.2fs", float64(len(flow))/float64(e.rate), float64(len(paused))/float64(e.rate))
+}
+
+// silentGaps returns the length in seconds of every inner silent run longer than 0.3 s.
+func silentGaps(s []float32, rate int) []float64 {
+	var out []float64
+	run := 0
+	for _, v := range s {
+		if v < 0.01 && v > -0.01 {
+			run++
+			continue
+		}
+		if run > rate*3/10 {
+			out = append(out, float64(run)/float64(rate))
+		}
+		run = 0
+	}
+	return out
+}

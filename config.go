@@ -10,10 +10,10 @@ import (
 	"strings"
 )
 
-var settingKeys = []string{"voice", "model", "speed", "pause", "lang", "output-dir"}
+var settingKeys = []string{"voice", "model", "speed", "pause", "sentence-pause", "lang", "output-dir"}
 
 var settingDefaults = map[string]string{
-	"voice": "af_heart", "model": models[0].name, "speed": "1.0", "pause": "0.6", "lang": "en-us", "output-dir": "",
+	"voice": "af_heart", "model": models[0].name, "speed": "1.0", "pause": "0.6", "sentence-pause": "0", "lang": "en-us", "output-dir": "",
 }
 
 func configPath() (string, error) {
@@ -42,11 +42,11 @@ func normalizeSetting(key, val string) (string, error) {
 			return strconv.FormatFloat(f, 'f', -1, 64), nil
 		}
 		return "", fmt.Errorf("speed must be between 0.5 and 2.0")
-	case "pause":
+	case "pause", "sentence-pause":
 		if f, err := strconv.ParseFloat(val, 64); err == nil && f >= 0 && f <= 3 {
 			return strconv.FormatFloat(f, 'f', -1, 64), nil
 		}
-		return "", fmt.Errorf("pause must be between 0 and 3 seconds")
+		return "", fmt.Errorf("%s must be between 0 and 3 seconds", key)
 	case "lang":
 		if val == "en-us" || val == "en-gb" {
 			return val, nil

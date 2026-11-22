@@ -35,6 +35,7 @@ func TestParseArgs(t *testing.T) {
 		{"hi", "-o", "-", "--play"},
 		{"hi", "--nope"},
 		{"hi", "-m", "kokoro-v9"},
+		{"hi", "--sentence-pause", "5"},
 	} {
 		if _, err := parseArgs(bad, nil); !errors.Is(err, errUsage) {
 			t.Errorf("%v: want usage error, got %v", bad, err)
