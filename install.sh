@@ -9,6 +9,8 @@ repo="adamwahyuh/clumyap"
 share="${XDG_DATA_HOME:-$HOME/.local/share}/clumyap"
 bin="$HOME/.local/bin"
 
+# Variables next to non-ASCII text are written as ${name}: in a UTF-8 locale bash reads "$bar█" as a
+# variable named "bar" plus the first byte of █, which set -u rejects.
 # Colours and animation only on a real terminal; `clumyap update` in the TUI and CI get plain lines.
 # CLUMYAP_FANCY=1 forces them on, so CI can run the drawing code too.
 if [ "${CLUMYAP_FANCY:-}" = 1 ] || { [ -t 1 ] && [ -z "${NO_COLOR:-}" ] && [ "${TERM:-dumb}" != dumb ]; }; then
@@ -86,7 +88,7 @@ download() {
 			filled=$((got * 20 / total))
 			bar="" n=0
 			while [ $n -lt 20 ]; do
-				if [ $n -lt $filled ]; then bar="$bar█"; else bar="$bar░"; fi
+				if [ $n -lt $filled ]; then bar="${bar}█"; else bar="${bar}░"; fi
 				n=$((n + 1))
 			done
 			printf '\r  %s%s%s Downloading  %s%s%s  %3d%%  %s%d/%d MB%s' "$pink" "$f" "$reset" "$purple" "$bar" "$reset" \
@@ -118,7 +120,7 @@ ln -sf "$share/clumyap" "$bin/clumyap"
 [ "$os" = macos ] && xattr -dr com.apple.quarantine "$share" 2>/dev/null || true
 
 version="$("$bin/clumyap" --version)"
-ok "Installed $bold$version$reset $dim→ $share$reset"
+ok "Installed ${bold}${version}${reset} ${dim}→ ${share}${reset}"
 
 # Make sure the command is found in new terminals.
 newterm=0
