@@ -13,19 +13,25 @@ Offline English text-to-speech. Kokoro voices running locally through sherpa-onn
 
 Clients for other platforms (Android, desktop) go in their own top-level folders next to `service/`.
 
-## Install from a release archive (macOS)
+## Install
 
-Download `clumyap-<version>-macos-arm64.tar.gz` (Apple Silicon) or `-amd64` (Intel), then:
+**macOS and Linux**, in a terminal:
 
 ```bash
-tar -xzf clumyap-0.1.0-macos-arm64.tar.gz
-mkdir -p ~/.local/share && mv clumyap-0.1.0-macos-arm64 ~/.local/share/clumyap
-xattr -dr com.apple.quarantine ~/.local/share/clumyap   # files from the internet are blocked until this
-ln -sf ~/.local/share/clumyap/clumyap /usr/local/bin/clumyap
-clumyap --version
+curl -fsSL https://raw.githubusercontent.com/adamwahyuh/clumyap/main/install.sh | sh
 ```
 
-Keep the `lib/` folder next to the `clumyap` binary; the binary loads its libraries from there. The archives are signed ad hoc, not notarized by Apple, which is why the `xattr` step is needed.
+**Windows**, in PowerShell:
+
+```powershell
+irm https://raw.githubusercontent.com/adamwahyuh/clumyap/main/install.ps1 | iex
+```
+
+Then open a new terminal and run `clumyap start`. The first run downloads the voice model (about 350 MB). Running the same command again updates clumyap. No admin rights are needed: files go to `~/.local/share/clumyap` (Windows: `%LOCALAPPDATA%\Programs\clumyap`).
+
+Builds exist for macOS (Apple Silicon, Intel), Linux (x64, arm64) and Windows (x64). Audio playback uses `afplay` on macOS, Windows' built-in player, and `pw-play`, `paplay`, `aplay` or `ffplay` on Linux.
+
+To uninstall: `rm -rf ~/.local/share/clumyap ~/.local/bin/clumyap` (Windows: delete the folder above and remove it from your user PATH).
 
 ## Build and install
 
@@ -39,10 +45,12 @@ go test ./...       # runs the tests; a few skip until the model is downloaded
 
 The first run downloads the Kokoro model (about 350 MB) to `~/.cache/clumyap`.
 
-A `go install` build finds its libraries in your Go module cache, so it only runs on the machine that built it. To make archives you can give to others:
+A `go install` build finds its libraries in your Go module cache, so it only runs on the machine that built it. `scripts/package.sh` makes self-contained archives for the OS it runs on (`dist/clumyap-<os>-<arch>.tar.gz`, `.zip` on Windows).
+
+Releases are built by GitHub Actions (`.github/workflows/release.yml`) on real macOS, Linux and Windows machines. To publish one, set the version in `service/VERSION`, commit, then push a matching tag:
 
 ```bash
-scripts/package.sh            # dist/clumyap-<version>-macos-arm64.tar.gz and -amd64.tar.gz
+git tag v0.1.0 && git push origin v0.1.0
 ```
 
 The version lives in `service/VERSION` and is compiled into the binary; `clumyap --version` prints it. Bump it there and rebuild.
@@ -57,8 +65,6 @@ clumyap --voices                               # list voices
 clumyap --set voice=bella --set sentence-pause=0.4   # save defaults
 clumyap --help                                 # every flag
 ```
-
-On macOS, `--play` and the interactive session play audio with the built-in `afplay`.
 
 ### Teaching pronunciation
 

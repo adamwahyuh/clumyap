@@ -8,7 +8,6 @@ import (
 	"fmt"
 	"io"
 	"os"
-	"os/exec"
 	"path/filepath"
 	"regexp"
 	"strconv"
@@ -275,7 +274,7 @@ func run(o options) error {
 	}
 	fmt.Println(o.output)
 	if o.play {
-		return exec.Command("afplay", o.output).Run()
+		return playSamples(samples, rate)
 	}
 	return nil
 }

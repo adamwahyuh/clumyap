@@ -158,8 +158,9 @@ func runTUI(o options) error {
 	if st, _ := os.Stdin.Stat(); st == nil || st.Mode()&os.ModeCharDevice == 0 {
 		return fmt.Errorf("%w: start needs an interactive terminal", errUsage)
 	}
-	// Start on a clean screen like Claude Code: cursor home + erase the visible screen.
-	// The scrollback is kept (no \x1b[3J), so earlier commands are still there when scrolling up.
+	// Start on a clean screen like Claude Code: cursor home + erase the visible screen, before Bubble Tea
+	// starts (sent later through tea.Raw it arrives only at exit). The scrollback is kept (no \x1b[3J).
+	enableVT()
 	fmt.Print("\x1b[H\x1b[2J")
 	m := newTUI(o)
 	m.prog = tea.NewProgram(m)
@@ -495,7 +496,7 @@ func (m *tui) command(line string) tea.Cmd {
 	return fail(fmt.Errorf("unknown command /%s, see /help", name))
 }
 
-// play writes the last audio to a temp WAV and plays it with afplay; any earlier playback stops.
+// play writes the last audio to a temp WAV and plays it; any earlier playback stops.
 func (m *tui) play() tea.Cmd {
 	m.stop()
 	f, err := os.CreateTemp("", "clumyap-*.wav")
@@ -504,7 +505,10 @@ func (m *tui) play() tea.Cmd {
 	}
 	err = writeWAV(f, m.last, m.eng.rate)
 	f.Close()
-	c := exec.Command("afplay", f.Name())
+	var c *exec.Cmd
+	if err == nil {
+		c, err = playerCommand(f.Name())
+	}
 	if err == nil {
 		err = c.Start()
 	}

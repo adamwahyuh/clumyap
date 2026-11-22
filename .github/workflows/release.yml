@@ -1,0 +1,94 @@
+name: build
+
+# Every push to main and every pull request builds, tests and packages clumyap on macOS, Linux and
+# Windows. Pushing a tag like v0.1.0 (matching service/VERSION) also publishes a GitHub release
+# whose files the install scripts download.
+on:
+  push:
+    branches: [main]
+    tags: ["v*"]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    name: ${{ matrix.name }}
+    runs-on: ${{ matrix.runner }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - { name: macOS, runner: macos-14 } # builds arm64 and cross-builds Intel
+          - { name: Linux x64, runner: ubuntu-22.04 } # older glibc, so it runs on more distros
+          - { name: Linux arm64, runner: ubuntu-22.04-arm }
+          - { name: Windows x64, runner: windows-latest }
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: service/go.mod
+          cache-dependency-path: service/go.sum
+
+      - name: Tag matches service/VERSION
+        if: startsWith(github.ref, 'refs/tags/')
+        run: test "v$(tr -d '[:space:]' < service/VERSION)" = "$GITHUB_REF_NAME"
+
+      - name: Install patchelf
+        if: runner.os == 'Linux'
+        run: sudo apt-get update && sudo apt-get install -y patchelf
+
+      - name: Test
+        if: runner.os != 'Windows' # the tests use Unix paths and symlinks
+        working-directory: service
+        run: go test ./...
+
+      - name: Package
+        run: scripts/package.sh
+
+      - name: Run the packaged build
+        run: |
+          mkdir -p smoke
+          case "$RUNNER_OS" in
+          Windows)
+            powershell -NoProfile -Command "Expand-Archive dist/clumyap-windows-amd64.zip smoke"
+            app=smoke/clumyap/clumyap.exe ;;
+          macOS)
+            tar -xzf dist/clumyap-macos-arm64.tar.gz -C smoke
+            app=smoke/clumyap/clumyap ;;
+          Linux)
+            tar -xzf dist/clumyap-linux-*.tar.gz -C smoke
+            app=smoke/clumyap/clumyap ;;
+          esac
+          "$app" --version
+          # Downloads the model and speaks, so the libraries, espeak data and model all load on this OS.
+          "$app" -q "Hello from GitHub Actions. It costs 4 dollars in 2026." -o smoke/hello.wav
+          test "$(wc -c < smoke/hello.wav)" -gt 100000
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: ${{ matrix.runner }}
+          path: dist/*
+
+  release:
+    needs: build
+    if: startsWith(github.ref, 'refs/tags/')
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          path: dist
+          merge-multiple: true
+      - name: Publish the release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          ls -la dist
+          gh release create "$GITHUB_REF_NAME" dist/* --repo "$GITHUB_REPOSITORY" \
+            --title "clumyap $GITHUB_REF_NAME" --generate-notes

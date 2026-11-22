@@ -9,6 +9,7 @@ require (
 	github.com/braheezy/shine-mp3 v0.2.0
 	github.com/csukuangfj/piper-phonemize-go v1.5.2
 	github.com/k2-fsa/sherpa-onnx-go/v2 v2.0.3
+	golang.org/x/sys v0.47.0
 )
 
 require (
@@ -33,5 +34,4 @@ require (
 	github.com/rivo/uniseg v0.4.8-0.20261110175422-3a370411ca06 // indirect
 	github.com/xo/terminfo v1.0.0 // indirect
 	golang.org/x/sync v0.22.0 // indirect
-	golang.org/x/sys v0.47.0 // indirect
 )
