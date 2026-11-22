@@ -127,5 +127,5 @@ func (e *engine) synth(text string, o options, progress func(para, total int, pc
 	if len(samples) == 0 {
 		return nil, fmt.Errorf("%w: nothing speakable in the text", errUsage)
 	}
-	return samples, nil
+	return normalize(samples, e.rate), nil
 }

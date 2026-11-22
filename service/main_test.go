@@ -3,6 +3,7 @@ package main
 import (
 	"bytes"
 	"errors"
+	"math"
 	"os"
 	"reflect"
 	"strings"
@@ -99,5 +100,45 @@ func TestEncoders(t *testing.T) {
 	}
 	if err := writeMP3(&m, samples, 24000); err != nil || m.Len() == 0 || m.Bytes()[0] != 0xFF {
 		t.Fatalf("mp3: len %d, %v", m.Len(), err)
+	}
+}
+
+func TestNormalize(t *testing.T) {
+	level := func(s []float32) float64 { // RMS in dBFS
+		var sum float64
+		for _, x := range s {
+			sum += float64(x) * float64(x)
+		}
+		return 20 * math.Log10(math.Sqrt(sum/float64(len(s))))
+	}
+	sine := func(amp float64, n int) []float32 {
+		s := make([]float32, n)
+		for i := range s {
+			s[i] = float32(amp * math.Sin(float64(i)/5))
+		}
+		return s
+	}
+	// A quiet and a loud signal both end at -20 dBFS.
+	for _, amp := range []float64{0.05, 0.3} {
+		if got := level(normalize(sine(amp, 24000), 24000)); math.Abs(got+20) > 0.5 {
+			t.Errorf("amp %.2f: level %.1f dBFS, want -20", amp, got)
+		}
+	}
+	// Long silence around the speech does not change the gain.
+	padded := append(append(make([]float32, 48000), sine(0.05, 24000)...), make([]float32, 48000)...)
+	if got := level(normalize(padded, 24000)[48000:72000]); math.Abs(got+20) > 0.5 {
+		t.Errorf("speech between pauses: %.1f dBFS, want -20", got)
+	}
+	// Peaks never pass full scale, silence stays silent, and a whisper is not boosted more than 12 dB.
+	for _, x := range normalize([]float32{0.05, 0.9, -0.95, 0.001}, 24000) {
+		if math.Abs(float64(x)) > 1 {
+			t.Fatalf("sample %v over full scale", x)
+		}
+	}
+	if out := normalize(make([]float32, 1000), 24000); out[0] != 0 {
+		t.Fatal("silence must stay silent")
+	}
+	if got := level(normalize(sine(0.005, 24000), 24000)); got > level(sine(0.005, 24000))+12.1 {
+		t.Errorf("gain above +12 dB: %.1f dBFS", got)
 	}
 }
