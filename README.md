@@ -73,6 +73,14 @@ Entries apply to the CLI and the interactive session, and are read fresh on ever
 
 Common chat shorthand is read in full without any setup: btw, idk, imo, tbh, brb, pls, thx, otw, hbd, nvm and more (`chatWords` in `service/g2p.go`). Shorthand usually said as letters (omg, lol, fyi, asap) stays as it is.
 
+## License
+
+Copyright (C) 2026 Adam Wahyu Hariyadi
+
+Clumyap is free software: you can redistribute it and/or modify it under the terms of the GNU General Public License as published by the Free Software Foundation, either version 3 of the License, or (at your option) any later version. It is distributed in the hope that it will be useful, but WITHOUT ANY WARRANTY; without even the implied warranty of MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See [LICENSE](LICENSE) for the full text.
+
+It is GPL because it links espeak-ng (GPL-3.0); every other part below is under a license compatible with it.
+
 ## Credits
 
 Made by Adam Wahyu Hariyadi. `/info` inside `clumyap start` shows the same list.

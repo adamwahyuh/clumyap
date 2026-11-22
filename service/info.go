@@ -26,7 +26,8 @@ func infoText() string {
 	var b strings.Builder
 	b.WriteString(accent.Render("clumyap") + dim.Render(" v"+version()+" · offline English text-to-speech") + "\n\n")
 	b.WriteString(dim.Render("made by  ") + pink.Render(appAuthor) + "\n")
-	b.WriteString(dim.Render("email    ") + cyan.Render(appEmail) + "\n\n")
+	b.WriteString(dim.Render("email    ") + cyan.Render(appEmail) + "\n")
+	b.WriteString(dim.Render("license  ") + "GPL-3.0-or-later" + dim.Render(" · free software, no warranty") + "\n\n")
 	b.WriteString(accent.Render("built with") + "\n")
 	for _, c := range credits {
 		b.WriteString("  " + fmt.Sprintf("%-16s", c.name) + dim.Render(fmt.Sprintf("%-16s", c.by)) +

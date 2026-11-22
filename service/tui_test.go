@@ -300,7 +300,7 @@ func TestDirPicker(t *testing.T) {
 
 func TestInfo(t *testing.T) {
 	txt := infoText()
-	for _, want := range []string{"v" + version(), appAuthor, appEmail, "Kokoro-82M", "hexgrad", "Apache-2.0", "espeak-ng", "GPL-3.0", "shine-mp3", "LGPL-2.0"} {
+	for _, want := range []string{"v" + version(), appAuthor, appEmail, "Kokoro-82M", "hexgrad", "Apache-2.0", "espeak-ng", "GPL-3.0", "shine-mp3", "LGPL-2.0", "GPL-3.0-or-later"} {
 		if !strings.Contains(txt, want) {
 			t.Errorf("/info is missing %q", want)
 		}
