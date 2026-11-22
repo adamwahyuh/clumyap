@@ -1,3 +1,4 @@
-clumyap
+# build output and generated audio
+/service/clumyap
 *.mp3
 *.wav
