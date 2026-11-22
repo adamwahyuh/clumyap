@@ -146,6 +146,7 @@ type tui struct {
 	pct    string
 	last   []float32
 	player *exec.Cmd
+	played string   // the temp WAV being played; removed when playback stops
 	sugs   []string // completion lines, see suggestions()
 	desc   map[string]string
 	sel    int // highlighted entry in the completion menu
@@ -546,7 +547,7 @@ func (m *tui) play() tea.Cmd {
 		os.Remove(f.Name())
 		return fail(err)
 	}
-	m.player = c
+	m.player, m.played = c, f.Name()
 	return func() tea.Msg {
 		c.Wait()
 		os.Remove(f.Name())
@@ -554,10 +555,15 @@ func (m *tui) play() tea.Cmd {
 	}
 }
 
+// stop ends playback and removes its temp WAV; on exit the playback goroutine never gets to.
 func (m *tui) stop() {
 	if m.player != nil {
 		m.player.Process.Kill()
 		m.player = nil
+	}
+	if m.played != "" {
+		os.Remove(m.played)
+		m.played = ""
 	}
 }
 

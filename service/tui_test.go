@@ -311,3 +311,18 @@ func TestInfo(t *testing.T) {
 		}
 	}
 }
+
+func TestStopRemovesTempWAV(t *testing.T) {
+	o, _ := parseArgs(nil, map[string]string{})
+	m := newTUI(o)
+	m.last, m.eng = make([]float32, 24000), &engine{rate: 24000}
+	m.play()
+	if m.played == "" {
+		t.Skip("no audio player on this machine")
+	}
+	path := m.played
+	m.stop() // what Esc, new audio and quitting all do
+	if _, err := os.Stat(path); !os.IsNotExist(err) {
+		t.Fatalf("temp WAV left behind: %s", path)
+	}
+}
