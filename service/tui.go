@@ -440,10 +440,13 @@ func (m *tui) command(line string) tea.Cmd {
 				"\n  /uninstall all   remove clumyap and "+dataSummary())
 		case "yes", "all":
 			m.stop()
-			if err := uninstall(arg == "all"); err != nil {
-				return fail(err)
+			var lines []string
+			err := uninstall(arg == "all", tuiSteps{&lines})
+			report := tea.Println(strings.Join(lines, "\n"))
+			if err != nil {
+				return tea.Sequence(report, fail(err))
 			}
-			return tea.Sequence(done(dim.Render("clumyap removed. Bye!")), tea.Quit)
+			return tea.Sequence(report, tea.Println(dim.Render("clumyap is uninstalled. To reinstall: "+reinstallHint())), tea.Quit)
 		}
 		return fail(errors.New("use /uninstall, /uninstall yes or /uninstall all"))
 	case "update":
