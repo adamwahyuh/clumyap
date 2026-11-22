@@ -140,3 +140,63 @@ func TestBannerAndLogo(t *testing.T) {
 		}
 	}
 }
+
+func TestTUIHistory(t *testing.T) {
+	t.Setenv("HOME", t.TempDir())
+	o, _ := parseArgs(nil, map[string]string{})
+	m := newTUI(o)
+	key := func(s string) { m.Update(keyPress(s)) }
+	send := func(s string) { m.setInput(s); m.submit() }
+
+	key("up") // no history yet: nothing happens
+	if m.input.Value() != "" {
+		t.Fatalf("up with no history changed input to %q", m.input.Value())
+	}
+	send("/voice bella")
+	send("/model")
+	send("/model") // same as the previous entry: stored once
+	send("First line\nsecond line")
+	if len(m.history) != 3 {
+		t.Fatalf("history = %q", m.history)
+	}
+
+	m.setInput("my draft")
+	key("up")
+	if m.input.Value() != "First line\nsecond line" {
+		t.Fatalf("up 1 = %q", m.input.Value())
+	}
+	key("up") // cursor is on the last line of a two-line entry: moves to its first line
+	if m.input.Value() != "First line\nsecond line" || m.input.Line() != 0 {
+		t.Fatalf("up inside a multi-line entry should move lines, got %q line %d", m.input.Value(), m.input.Line())
+	}
+	key("up")
+	if m.input.Value() != "/model" {
+		t.Fatalf("up 3 = %q", m.input.Value())
+	}
+	key("up") // "/model" would open the completion menu; while browsing, up keeps going back
+	if m.input.Value() != "/voice bella" {
+		t.Fatalf("up 4 = %q", m.input.Value())
+	}
+	key("up") // oldest: stays
+	if m.input.Value() != "/voice bella" {
+		t.Fatalf("up past oldest = %q", m.input.Value())
+	}
+	key("down")
+	key("down")
+	if m.input.Value() != "First line\nsecond line" {
+		t.Fatalf("down 2 = %q", m.input.Value())
+	}
+	key("down")
+	if m.input.Value() != "my draft" {
+		t.Fatalf("down past newest should restore the draft, got %q", m.input.Value())
+	}
+
+	// Editing a recalled entry ends browsing, so the menu works again.
+	key("up")
+	key("up")
+	key("up") // "/model"
+	m.Update(tea.KeyPressMsg{Code: ' ', Text: " "})
+	if m.input.Value() != "/model " || len(m.matches()) == 0 {
+		t.Fatalf("after editing, completion should be back: %q, %d matches", m.input.Value(), len(m.matches()))
+	}
+}

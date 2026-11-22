@@ -145,6 +145,10 @@ type tui struct {
 	sugs   []string // completion lines, see suggestions()
 	desc   map[string]string
 	sel    int // highlighted entry in the completion menu
+
+	history []string // what was sent this session, oldest first
+	histIdx int      // entry shown while browsing; len(history) = not browsing
+	draft   string   // the unsent input, restored when browsing back past the newest entry
 }
 
 func runTUI(o options) error {
@@ -187,6 +191,9 @@ func newTUI(o options) *tui {
 
 // matches are the completions for a one-line "/..." input, case-insensitive by prefix.
 func (m *tui) matches() []string {
+	if m.histIdx < len(m.history) {
+		return nil // browsing history: keep the arrows for history until the user edits
+	}
 	val := strings.ToLower(m.input.Value())
 	if !strings.HasPrefix(val, "/") || strings.Contains(val, "\n") {
 		return nil
@@ -201,6 +208,18 @@ func (m *tui) matches() []string {
 		return nil // already complete
 	}
 	return out
+}
+
+// showHistory puts history entry i in the input, or the saved draft when i is past the newest.
+func (m *tui) showHistory(i int) {
+	m.histIdx = i
+	text := m.draft
+	if i < len(m.history) {
+		text = m.history[i]
+	}
+	m.input.SetValue(text)
+	m.input.MoveToEnd()
+	m.sel = 0
 }
 
 func (m *tui) setInput(s string) {
@@ -265,12 +284,24 @@ func (m *tui) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				m.sel = (m.sel + step + len(matches)) % len(matches)
 				return m, nil
 			}
+			// On the first line up recalls older input, on the last line down newer; elsewhere they move lines.
+			if msg.String() == "up" && m.input.Line() == 0 && m.histIdx > 0 {
+				if m.histIdx == len(m.history) {
+					m.draft = m.input.Value()
+				}
+				m.showHistory(m.histIdx - 1)
+				return m, nil
+			}
+			if msg.String() == "down" && m.input.Line() == m.input.LineCount()-1 && m.histIdx < len(m.history) {
+				m.showHistory(m.histIdx + 1)
+				return m, nil
+			}
 		}
 		before := m.input.Value()
 		var cmd tea.Cmd
 		m.input, cmd = m.input.Update(msg)
 		if m.input.Value() != before {
-			m.sel = 0
+			m.sel, m.histIdx = 0, len(m.history) // editing ends history browsing
 		}
 		return m, cmd
 	case spinner.TickMsg:
@@ -320,6 +351,10 @@ func (m *tui) submit() tea.Cmd {
 	if line == "" {
 		return nil
 	}
+	if n := len(m.history); n == 0 || m.history[n-1] != line {
+		m.history = append(m.history, line)
+	}
+	m.histIdx, m.draft = len(m.history), ""
 	m.setInput("")
 	isCommand := strings.HasPrefix(line, "/") && !strings.Contains(line, "\n")
 	shown := strings.ReplaceAll(line, "\n", "\n  ")
