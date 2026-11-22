@@ -10,8 +10,9 @@ import (
 	"strings"
 	"time"
 
+	"charm.land/bubbles/v2/key"
 	"charm.land/bubbles/v2/spinner"
-	"charm.land/bubbles/v2/textinput"
+	"charm.land/bubbles/v2/textarea"
 	tea "charm.land/bubbletea/v2"
 	"charm.land/lipgloss/v2"
 )
@@ -60,12 +61,13 @@ func banner() string {
 	for i, r := range word {
 		b.WriteString(lipgloss.NewStyle().Foreground(colors[i]).Bold(true).Render(string(r)))
 	}
-	return "♪ " + b.String() + dim.Render("  offline text-to-speech · ") + cyan.Render("/help") + dim.Render(" for commands · ") + cyan.Render("Tab") + dim.Render(" to complete")
+	return "♪ " + b.String() + dim.Render("  offline text-to-speech · ") + cyan.Render("/help") + dim.Render(" for commands · ") + cyan.Render("Tab") + dim.Render(" to complete · ") + cyan.Render("shift/option+enter") + dim.Render(" new line")
 }
 
 func helpText() string {
 	var b strings.Builder
-	b.WriteString(dim.Render("Type text and press Enter to hear it.") + "\n")
+	b.WriteString(dim.Render("Type text and press Enter to hear it. New line: Shift+Enter, Option+Enter, Ctrl+J, or end the line with \\.") + "\n")
+	b.WriteString(dim.Render("A blank line between paragraphs adds the /pause silence.") + "\n")
 	for _, c := range tuiCommands {
 		left := "/" + c.name
 		if c.args != "" {
@@ -76,7 +78,7 @@ func helpText() string {
 	return strings.TrimSuffix(b.String(), "\n")
 }
 
-// suggestions are full input lines the textinput offers for prefix completion; desc feeds the menu.
+// suggestions are full input lines offered for Tab completion; desc feeds the menu.
 func suggestions() (lines []string, desc map[string]string) {
 	desc = map[string]string{}
 	add := func(line, d string) { lines = append(lines, line); desc[line] = d }
@@ -117,13 +119,15 @@ type tui struct {
 	o      options
 	eng    *engine
 	prog   *tea.Program
-	input  textinput.Model
+	input  textarea.Model
 	spin   spinner.Model
 	busy   string // what the engine is doing; "" = idle. The engine runs one job at a time.
 	pct    string
 	last   []float32
 	player *exec.Cmd
+	sugs   []string // completion lines, see suggestions()
 	desc   map[string]string
+	sel    int // highlighted entry in the completion menu
 }
 
 func runTUI(o options) error {
@@ -140,19 +144,49 @@ func runTUI(o options) error {
 
 func newTUI(o options) *tui {
 	o.voice = voices[voiceID(o.voice)]
-	in := textinput.New()
-	in.Prompt = "› "
+	in := textarea.New()
 	in.Placeholder = "type text to speak, or / for commands"
+	in.ShowLineNumbers = false
+	in.DynamicHeight, in.MinHeight, in.MaxHeight = true, 1, 10
+	in.SetPromptFunc(2, func(p textarea.PromptInfo) string {
+		if p.LineNumber == 0 {
+			return "› "
+		}
+		return "  "
+	})
+	// Enter sends; these insert a line break. Plain terminals (e.g. macOS Terminal) send shift+enter
+	// as enter, so option+enter, ctrl+j and a trailing "\" work everywhere.
+	in.KeyMap.InsertNewline = key.NewBinding(key.WithKeys("shift+enter", "alt+enter", "ctrl+j"))
 	st := in.Styles()
-	st.Focused.Prompt = accent
-	st.Focused.Placeholder = dim
-	st.Focused.Suggestion = dim
+	st.Focused.Prompt, st.Focused.Placeholder, st.Focused.CursorLine = accent, dim, lipgloss.NewStyle()
 	in.SetStyles(st)
-	lines, desc := suggestions()
-	in.ShowSuggestions = true
-	in.SetSuggestions(lines)
 	in.Focus()
-	return &tui{o: o, input: in, desc: desc, spin: spinner.New(spinner.WithSpinner(spinner.MiniDot), spinner.WithStyle(pink))}
+	lines, desc := suggestions()
+	return &tui{o: o, input: in, sugs: lines, desc: desc, spin: spinner.New(spinner.WithSpinner(spinner.MiniDot), spinner.WithStyle(pink))}
+}
+
+// matches are the completions for a one-line "/..." input, case-insensitive by prefix.
+func (m *tui) matches() []string {
+	val := strings.ToLower(m.input.Value())
+	if !strings.HasPrefix(val, "/") || strings.Contains(val, "\n") {
+		return nil
+	}
+	var out []string
+	for _, s := range m.sugs {
+		if strings.HasPrefix(strings.ToLower(s), val) {
+			out = append(out, s)
+		}
+	}
+	if len(out) == 1 && strings.EqualFold(out[0], m.input.Value()) {
+		return nil // already complete
+	}
+	return out
+}
+
+func (m *tui) setInput(s string) {
+	m.input.SetValue(s)
+	m.input.MoveToEnd()
+	m.sel = 0
 }
 
 func say(style lipgloss.Style, s string) tea.Cmd { return tea.Println(style.Render(s)) }
@@ -181,8 +215,9 @@ func (m *tui) load(name string) tea.Cmd {
 func (m *tui) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	switch msg := msg.(type) {
 	case tea.WindowSizeMsg:
-		m.input.SetWidth(max(10, msg.Width-6))
+		m.input.SetWidth(max(10, msg.Width-4))
 	case tea.KeyPressMsg:
+		matches := m.matches()
 		switch msg.String() {
 		case "ctrl+c":
 			return m, tea.Quit
@@ -194,8 +229,30 @@ func (m *tui) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.stop()
 			return m, nil
 		case "enter":
+			if v := m.input.Value(); strings.HasSuffix(v, `\`) {
+				m.setInput(strings.TrimSuffix(v, `\`) + "\n")
+				return m, nil
+			}
 			return m, m.submit()
+		case "tab":
+			if len(matches) > 0 {
+				m.setInput(matches[min(m.sel, len(matches)-1)])
+			}
+			return m, nil
+		case "up", "down":
+			if len(matches) > 0 { // with the menu open the arrows pick; otherwise they move between lines
+				step := map[string]int{"up": -1, "down": 1}[msg.String()]
+				m.sel = (m.sel + step + len(matches)) % len(matches)
+				return m, nil
+			}
 		}
+		before := m.input.Value()
+		var cmd tea.Cmd
+		m.input, cmd = m.input.Update(msg)
+		if m.input.Value() != before {
+			m.sel = 0
+		}
+		return m, cmd
 	case spinner.TickMsg:
 		if m.busy == "" {
 			return m, nil
@@ -243,12 +300,14 @@ func (m *tui) submit() tea.Cmd {
 	if line == "" {
 		return nil
 	}
-	m.input.Reset()
-	echo := tea.Println(accent.Render("› ") + line)
-	if strings.HasPrefix(line, "/") {
-		echo = tea.Println(accent.Render("› ") + cyan.Render(line))
+	m.setInput("")
+	isCommand := strings.HasPrefix(line, "/") && !strings.Contains(line, "\n")
+	shown := strings.ReplaceAll(line, "\n", "\n  ")
+	if isCommand {
+		shown = cyan.Render(line)
 	}
-	if strings.HasPrefix(line, "/") {
+	echo := tea.Println(accent.Render("› ") + shown)
+	if isCommand {
 		return tea.Sequence(echo, m.command(line))
 	}
 	switch {
@@ -410,13 +469,12 @@ func (m *tui) View() tea.View {
 
 // menu lists the completions for a "/..." input, highlighting the one Tab will accept.
 func (m *tui) menu() string {
-	val := m.input.Value()
-	matches := m.input.MatchedSuggestions()
-	if !strings.HasPrefix(val, "/") || len(matches) == 0 || (len(matches) == 1 && matches[0] == val) {
+	matches := m.matches()
+	if len(matches) == 0 {
 		return ""
 	}
 	const rows = 6
-	cur := m.input.CurrentSuggestionIndex()
+	cur := min(m.sel, len(matches)-1)
 	start := min(max(0, cur-rows+1), max(0, len(matches)-rows))
 	end := min(len(matches), start+rows)
 	width := 0
