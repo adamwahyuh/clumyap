@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"path/filepath"
 	"runtime"
+	"strings"
 
 	pp "github.com/csukuangfj/piper-phonemize-go/piper_phonemize"
 	sherpa "github.com/k2-fsa/sherpa-onnx-go/v2/sherpa_onnx"
@@ -75,8 +76,11 @@ func (e *engine) synth(text, voice, lang string, speed float64, progress func(pa
 	return samples, nil
 }
 
+// espeak drops ellipses and glues the words around them ("Wait... really" -> "waitreally"); a comma keeps the pause.
+var ellipsis = strings.NewReplacer("...", ", ", "…", ", ")
+
 func phonemize(text, voice string) [][]int32 {
-	r := pp.Phonemize(text, voice)
+	r := pp.Phonemize(ellipsis.Replace(text), voice)
 	defer pp.DeletePhonemizeResult(r)
 	out := make([][]int32, r.GetNumSentences())
 	for s := range out {
