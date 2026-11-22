@@ -2,6 +2,7 @@
 package main
 
 import (
+	"cmp"
 	"errors"
 	"flag"
 	"fmt"
@@ -11,7 +12,6 @@ import (
 	"path/filepath"
 	"regexp"
 	"runtime"
-	"slices"
 	"strings"
 	"time"
 
@@ -29,7 +29,7 @@ Usage:
 Flags:
   -o, --output FILE   output .mp3 or .wav, "-" for MP3 on stdout (default clumyap-<time>.mp3)
   -f, --file FILE     read text from a file
-  -v, --voice NAME    voice (default af_heart), see --voices
+  -v, --voice NAME    voice, e.g. af_sarah or just sarah (default af_heart), see --voices
   -s, --speed N       speed 0.5-2.0 (default 1.0)
   -l, --lang LANG     en-us or en-gb (default en-us)
   -m, --model NAME    model (default kokoro-multi-lang-v1_0), see --models
@@ -39,6 +39,7 @@ Flags:
   -q, --quiet         no progress output
 
 Env:
+  CLUMYAP_VOICE       default voice, overridden by --voice
   CLUMYAP_MODEL       default model, overridden by --model
   CLUMYAP_MODEL_DIR   model folder (default ~/.cache/clumyap)
   CLUMYAP_OUTPUT_DIR  folder for the auto-named output when -o is not given (default: current folder)
@@ -87,8 +88,9 @@ func parseArgs(args []string) (options, error) {
 	for _, n := range []string{"f", "file"} {
 		fs.StringVar(&o.file, n, "", "")
 	}
+	defaultVoice := cmp.Or(os.Getenv("CLUMYAP_VOICE"), "af_heart")
 	for _, n := range []string{"v", "voice"} {
-		fs.StringVar(&o.voice, n, "af_heart", "")
+		fs.StringVar(&o.voice, n, defaultVoice, "")
 	}
 	for _, n := range []string{"s", "speed"} {
 		fs.Float64Var(&o.speed, n, 1.0, "")
@@ -134,7 +136,7 @@ func parseArgs(args []string) (options, error) {
 		return o, fmt.Errorf("%w: --speed must be between 0.5 and 2.0", errUsage)
 	case o.lang != "en-us" && o.lang != "en-gb":
 		return o, fmt.Errorf("%w: --lang must be en-us or en-gb", errUsage)
-	case !slices.Contains(voices, o.voice):
+	case voiceID(o.voice) < 0:
 		return o, fmt.Errorf("%w: unknown voice %q, see --voices", errUsage, o.voice)
 	case o.output == "-" && o.play:
 		return o, fmt.Errorf("%w: --play cannot be used with -o -", errUsage)
@@ -187,7 +189,7 @@ func logf(quiet bool, format string, a ...any) {
 
 func run(o options) error {
 	if o.listVoices {
-		fmt.Println(strings.Join(voices, "\n"))
+		printVoices()
 		return nil
 	}
 	if o.listModels {
@@ -237,7 +239,7 @@ func run(o options) error {
 	}
 	espeakVoice := map[string]string{"en-us": "en-us", "en-gb": "en-gb-x-rp"}[o.lang]
 
-	sid := slices.Index(voices, o.voice)
+	sid := voiceID(o.voice)
 	rate := tts.SampleRate()
 	pause := make([]float32, rate*6/10) // 0.6 s between paragraphs
 	var samples []float32

@@ -13,6 +13,13 @@ func TestParseArgs(t *testing.T) {
 	if err != nil || o.text != "Hello world" || o.output != "a.wav" || o.voice != "am_michael" || o.speed != 1.2 {
 		t.Fatalf("got %+v, %v", o, err)
 	}
+	if voiceID("Sarah") != voiceID("af_sarah") || voiceID("af_sarah") != 9 || voiceID("bm_lewis") != 27 || voiceID("x") != -1 {
+		t.Error("voiceID lookup wrong")
+	}
+	t.Setenv("CLUMYAP_VOICE", "bella")
+	if o, err := parseArgs([]string{"hi"}); err != nil || o.voice != "bella" {
+		t.Errorf("CLUMYAP_VOICE not applied: %q %v", o.voice, err)
+	}
 	t.Setenv("CLUMYAP_OUTPUT_DIR", "/tmp/out")
 	if o, _ := parseArgs([]string{"hi"}); !strings.HasPrefix(o.output, "/tmp/out/clumyap-") {
 		t.Errorf("output dir not applied: %s", o.output)
