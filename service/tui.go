@@ -151,6 +151,9 @@ func runTUI(o options) error {
 	if st, _ := os.Stdin.Stat(); st == nil || st.Mode()&os.ModeCharDevice == 0 {
 		return fmt.Errorf("%w: start needs an interactive terminal", errUsage)
 	}
+	// Start on a clean screen like Claude Code: cursor home + erase the visible screen.
+	// The scrollback is kept (no \x1b[3J), so earlier commands are still there when scrolling up.
+	fmt.Print("\x1b[H\x1b[2J")
 	m := newTUI(o)
 	m.prog = tea.NewProgram(m)
 	_, err := m.prog.Run()
