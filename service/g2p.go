@@ -79,6 +79,22 @@ var (
 		"sep": "september", "sept": "september", "oct": "october", "nov": "november", "dec": "december"}
 )
 
+// Chat shorthand that people say in full, but that would otherwise be spelled letter by letter
+// ("btw" -> "B T W") or garbled ("idk"). Ones normally said as letters (omg, lol, fyi, asap, dm) stay.
+var chatWords = map[string]string{
+	"btw": "by the way", "idk": "I don't know", "idc": "I don't care", "imo": "in my opinion",
+	"imho": "in my humble opinion", "tbh": "to be honest", "brb": "be right back", "ikr": "I know right",
+	"thx": "thanks", "thnx": "thanks", "pls": "please", "plz": "please", "ppl": "people", "msg": "message",
+	"w/": "with", "w/o": "without", "b4": "before", "gr8": "great", "np": "no problem", "ty": "thank you",
+	"tysm": "thank you so much", "jk": "just kidding", "afaik": "as far as I know", "cmiiw": "correct me if I'm wrong",
+	"otw": "on the way", "hbd": "happy birthday", "gws": "get well soon", "irl": "in real life", "nvm": "never mind",
+	"rn": "right now", "ily": "I love you", "smh": "shaking my head", "tmr": "tomorrow", "tmrw": "tomorrow",
+	"wyd": "what are you doing", "hbu": "how about you", "ofc": "of course",
+}
+
+// Short ones that are also plain letters ("R&D", "BC") count only when written in lower case.
+var chatWordsLower = map[string]string{"r": "are", "ur": "your", "bc": "because"}
+
 // sentences returns the paragraph as one phoneme string per sentence.
 func (g *g2p) sentences(text string) []string {
 	var toks []token
@@ -93,6 +109,12 @@ func (g *g2p) sentences(text string) []string {
 			t.core, t.abbrev = otherAbbrevs[lower], true
 		case dotted && (initialism.MatchString(t.core) || singleInitial.MatchString(t.core)):
 			t.abbrev = true // "p.m.", "e.g.", "U.S.", "J."
+		case g.user[lower] != "":
+			// the personal lexicon decides
+		case chatWords[lower] != "" && (t.core == lower || t.core == strings.ToUpper(t.core)):
+			t.core = chatWords[lower] // "btw" or "BTW", not "Btw" in a name
+		case chatWordsLower[t.core] != "":
+			t.core = chatWordsLower[t.core]
 		}
 		toks = append(toks, t)
 	}
@@ -103,22 +125,26 @@ func (g *g2p) sentences(text string) []string {
 	future := fNone
 	for i := len(toks) - 1; i >= 0; i-- {
 		t := &toks[i]
-		var parts []string
-		for _, w := range strings.Fields(t.core) {
-			parts = append(parts, g.word(w))
-		}
-		t.ph = strings.Join(parts, " ")
 		if strings.ContainsAny(t.trail, nonQuotePunct) {
 			future = fNone
 		}
-		if _, mine := g.user[strings.ToLower(t.core)]; !mine {
-			if forms := g.het[strings.ToLower(t.core)]; forms != nil && !t.abbrev {
-				prev, next, nextIsPunct := neighbours(toks, i)
-				t.ph = pickForm(forms, wordClass(prev, next, nextIsPunct, pastCue), future)
+		// An expansion ("by the way", "doctor") is several words; each gets the weak-form rules too.
+		words := strings.Fields(t.core)
+		phs := make([]string, len(words))
+		for j := len(words) - 1; j >= 0; j-- {
+			w := words[j]
+			ph := g.word(w)
+			if _, mine := g.user[strings.ToLower(w)]; !mine {
+				if forms := g.het[strings.ToLower(w)]; forms != nil && len(words) == 1 && !t.abbrev {
+					prev, next, nextIsPunct := neighbours(toks, i)
+					ph = pickForm(forms, wordClass(prev, next, nextIsPunct, pastCue), future)
+				}
+				ph = reduced(w, ph, future, g)
 			}
-			t.ph = reduced(t.core, t.ph, future, g)
+			phs[j] = ph
+			future = startOf(ph, future)
 		}
-		future = startOf(t.ph, future)
+		t.ph = strings.Join(phs, " ")
 		if strings.ContainsAny(t.lead, nonQuotePunct) {
 			future = fNone
 		}

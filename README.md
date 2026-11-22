@@ -51,6 +51,8 @@ adam = /ˈædəm/            # or Kokoro phonemes between slashes
 
 Entries apply to the CLI and the interactive session, and are read fresh on every run.
 
+Common chat shorthand is read in full without any setup: btw, idk, imo, tbh, brb, pls, thx, otw, hbd, nvm and more (`chatWords` in `service/g2p.go`). Shorthand usually said as letters (omg, lol, fyi, asap) stays as it is.
+
 ## Credits
 
 Made by Adam Wahyu Hariyadi. `/info` inside `clumyap start` shows the same list.

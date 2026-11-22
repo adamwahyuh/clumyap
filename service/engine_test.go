@@ -248,3 +248,23 @@ func TestPausesCutAtCommas(t *testing.T) {
 		t.Error("splitting must not lose or change text")
 	}
 }
+
+func TestChatWords(t *testing.T) {
+	g := &g2p{lex: map[string]string{"by": "bˈI", "the": "ði", "way": "wˈA", "are": "ɑɹ", "you": "ju", "ok": "ˌOkˈA",
+		"please": "plˈiz", "come": "kˈʌm", "your": "jʊɹ", "turn": "tˈɜɹn", "r": "ˈɑɹ", "and": "ænd", "d": "dˈi", "on": "ɔn"}}
+	for in, want := range map[string]string{
+		"btw r u ok":       "bˈI ðə wˈA ɑɹ jˈu ˌOkˈA",
+		"BTW pls come":     "bˈI ðə wˈA plˈiz kˈʌm",
+		"ur turn, R and D": "jʊɹ tˈɜɹn, ˈɑɹ ænd dˈi",
+		"otw":              "ɔn ðə wˈA",
+	} {
+		if got := strings.Join(g.sentences(in), " "); got != want {
+			t.Errorf("%q: got %q, want %q", in, got, want)
+		}
+	}
+	// The personal lexicon wins over the built-in expansion.
+	g.user = map[string]string{"btw": "/bˈitˌu/"}
+	if got := strings.Join(g.sentences("btw"), " "); got != "bˈitˌu" {
+		t.Errorf("personal lexicon should win: %q", got)
+	}
+}
