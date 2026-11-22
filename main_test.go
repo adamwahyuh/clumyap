@@ -3,36 +3,29 @@ package main
 import (
 	"bytes"
 	"errors"
+	"os"
 	"reflect"
 	"strings"
 	"testing"
 )
 
 func TestParseArgs(t *testing.T) {
-	o, err := parseArgs([]string{"Hello", "world", "-o", "a.wav", "-v", "am_michael", "--speed", "1.2"})
+	o, err := parseArgs([]string{"Hello", "world", "-o", "a.wav", "-v", "am_michael", "--speed", "1.2"}, nil)
 	if err != nil || o.text != "Hello world" || o.output != "a.wav" || o.voice != "am_michael" || o.speed != 1.2 {
 		t.Fatalf("got %+v, %v", o, err)
 	}
 	if voiceID("Sarah") != voiceID("af_sarah") || voiceID("af_sarah") != 9 || voiceID("bm_lewis") != 27 || voiceID("x") != -1 {
 		t.Error("voiceID lookup wrong")
 	}
-	t.Setenv("CLUMYAP_VOICE", "bella")
-	if o, err := parseArgs([]string{"hi"}); err != nil || o.voice != "bella" {
-		t.Errorf("CLUMYAP_VOICE not applied: %q %v", o.voice, err)
+
+	cfg := map[string]string{"voice": "af_bella", "speed": "1.3", "output-dir": "/tmp/out", "model": "kokoro-int8-multi-lang-v1_0"}
+	o, err = parseArgs([]string{"hi"}, cfg)
+	if err != nil || o.voice != "af_bella" || o.speed != 1.3 || o.model != cfg["model"] || !strings.HasPrefix(o.output, "/tmp/out/clumyap-") {
+		t.Errorf("config not applied: %+v %v", o, err)
 	}
-	t.Setenv("CLUMYAP_OUTPUT_DIR", "/tmp/out")
-	if o, _ := parseArgs([]string{"hi"}); !strings.HasPrefix(o.output, "/tmp/out/clumyap-") {
-		t.Errorf("output dir not applied: %s", o.output)
-	}
-	if o, _ := parseArgs([]string{"hi", "-o", "x.mp3"}); o.output != "x.mp3" {
-		t.Errorf("-o must win over CLUMYAP_OUTPUT_DIR: %s", o.output)
-	}
-	t.Setenv("CLUMYAP_MODEL", "kokoro-int8-multi-lang-v1_0")
-	if o, _ := parseArgs([]string{"hi"}); o.model != "kokoro-int8-multi-lang-v1_0" {
-		t.Errorf("CLUMYAP_MODEL not applied: %s", o.model)
-	}
-	if o, _ := parseArgs([]string{"hi", "-m", "kokoro-multi-lang-v1_0"}); o.model != "kokoro-multi-lang-v1_0" {
-		t.Errorf("--model must win over CLUMYAP_MODEL: %s", o.model)
+	o, _ = parseArgs([]string{"hi", "-o", "x.mp3", "-v", "adam", "-s", "1", "-m", "kokoro-multi-lang-v1_0"}, cfg)
+	if o.output != "x.mp3" || o.voice != "adam" || o.speed != 1 || o.model != "kokoro-multi-lang-v1_0" {
+		t.Errorf("flags must win over config: %+v", o)
 	}
 	for _, bad := range [][]string{
 		{"hi", "-s", "3"},
@@ -43,9 +36,46 @@ func TestParseArgs(t *testing.T) {
 		{"hi", "--nope"},
 		{"hi", "-m", "kokoro-v9"},
 	} {
-		if _, err := parseArgs(bad); !errors.Is(err, errUsage) {
+		if _, err := parseArgs(bad, nil); !errors.Is(err, errUsage) {
 			t.Errorf("%v: want usage error, got %v", bad, err)
 		}
+	}
+}
+
+func TestConfig(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	cfg, err := loadConfig()
+	if err != nil || len(cfg) != 0 {
+		t.Fatalf("missing file should mean empty config: %v %v", cfg, err)
+	}
+	if err := updateConfig(cfg, []string{"voice=Bella", "output-dir=~/Music/x", "speed=1.10"}, nil); err != nil {
+		t.Fatal(err)
+	}
+	cfg, _ = loadConfig()
+	want := map[string]string{"voice": "af_bella", "output-dir": home + "/Music/x", "speed": "1.1"}
+	if !reflect.DeepEqual(cfg, want) {
+		t.Fatalf("got %v", cfg)
+	}
+	if err := updateConfig(cfg, nil, []string{"voice"}); err != nil {
+		t.Fatal(err)
+	}
+	if cfg, _ = loadConfig(); cfg["voice"] != "" || cfg["speed"] != "1.1" {
+		t.Fatalf("unset failed: %v", cfg)
+	}
+	for _, bad := range [][]string{{"voice=nobody"}, {"speed=9"}, {"color=red"}, {"voice"}, {"output-dir="}} {
+		if err := updateConfig(map[string]string{}, bad, nil); !errors.Is(err, errUsage) {
+			t.Errorf("%v: want usage error, got %v", bad, err)
+		}
+	}
+	if err := updateConfig(map[string]string{}, nil, []string{"color"}); !errors.Is(err, errUsage) {
+		t.Errorf("unset unknown: want usage error, got %v", err)
+	}
+	// A hand-edited bad value is dropped on load instead of breaking every run.
+	path, _ := configPath()
+	os.WriteFile(path, []byte(`{"speed":"fast","voice":"af_sky"}`), 0o644)
+	if cfg, err = loadConfig(); err != nil || !reflect.DeepEqual(cfg, map[string]string{"voice": "af_sky"}) {
+		t.Fatalf("got %v %v", cfg, err)
 	}
 }
 

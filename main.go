@@ -12,6 +12,7 @@ import (
 	"path/filepath"
 	"regexp"
 	"runtime"
+	"strconv"
 	"strings"
 	"time"
 
@@ -38,30 +39,32 @@ Flags:
       --models        list models (* = default, installed = already downloaded)
   -q, --quiet         no progress output
 
+Settings (saved defaults, a flag always wins):
+      --config        show settings
+      --set KEY=VALUE save a default, repeatable: voice, model, speed, lang, output-dir
+      --unset KEY     back to the built-in default, repeatable
+  e.g. clumyap --set voice=bella --set output-dir=~/Music/clumyap
+
 Env:
-  CLUMYAP_VOICE       default voice, overridden by --voice
-  CLUMYAP_MODEL       default model, overridden by --model
   CLUMYAP_MODEL_DIR   model folder (default ~/.cache/clumyap)
-  CLUMYAP_OUTPUT_DIR  folder for the auto-named output when -o is not given (default: current folder)
 `
 
 type options struct {
-	text, output, file, voice, lang, model string
-	speed                                  float64
-	play, listVoices, listModels, quiet    bool
-}
-
-func defaultModel() string {
-	if m := os.Getenv("CLUMYAP_MODEL"); m != "" {
-		return m
-	}
-	return models[0].name
+	text, output, file, voice, lang, model        string
+	speed                                         float64
+	play, listVoices, listModels, quiet, showConf bool
+	sets, unsets                                  multiFlag
+	cfg                                           map[string]string
 }
 
 var errUsage = errors.New("usage")
 
 func main() {
-	opts, err := parseArgs(os.Args[1:])
+	cfg, err := loadConfig()
+	var opts options
+	if err == nil {
+		opts, err = parseArgs(os.Args[1:], cfg)
+	}
 	if err == nil {
 		err = run(opts)
 	}
@@ -78,8 +81,11 @@ func main() {
 	}
 }
 
-func parseArgs(args []string) (options, error) {
-	var o options
+func parseArgs(args []string, cfg map[string]string) (options, error) {
+	o := options{cfg: cfg}
+	setting := func(k string) string { return cmp.Or(cfg[k], settingDefaults[k]) }
+	// Saved speed was validated on load, so this parse cannot fail.
+	defaultSpeed, _ := strconv.ParseFloat(setting("speed"), 64)
 	fs := flag.NewFlagSet("clumyap", flag.ContinueOnError)
 	fs.SetOutput(io.Discard)
 	for _, n := range []string{"o", "output"} {
@@ -88,25 +94,27 @@ func parseArgs(args []string) (options, error) {
 	for _, n := range []string{"f", "file"} {
 		fs.StringVar(&o.file, n, "", "")
 	}
-	defaultVoice := cmp.Or(os.Getenv("CLUMYAP_VOICE"), "af_heart")
 	for _, n := range []string{"v", "voice"} {
-		fs.StringVar(&o.voice, n, defaultVoice, "")
+		fs.StringVar(&o.voice, n, setting("voice"), "")
 	}
 	for _, n := range []string{"s", "speed"} {
-		fs.Float64Var(&o.speed, n, 1.0, "")
+		fs.Float64Var(&o.speed, n, defaultSpeed, "")
 	}
 	for _, n := range []string{"l", "lang"} {
-		fs.StringVar(&o.lang, n, "en-us", "")
+		fs.StringVar(&o.lang, n, setting("lang"), "")
 	}
 	for _, n := range []string{"q", "quiet"} {
 		fs.BoolVar(&o.quiet, n, false, "")
 	}
 	for _, n := range []string{"m", "model"} {
-		fs.StringVar(&o.model, n, defaultModel(), "")
+		fs.StringVar(&o.model, n, setting("model"), "")
 	}
 	fs.BoolVar(&o.play, "play", false, "")
 	fs.BoolVar(&o.listVoices, "voices", false, "")
 	fs.BoolVar(&o.listModels, "models", false, "")
+	fs.BoolVar(&o.showConf, "config", false, "")
+	fs.Var(&o.sets, "set", "")
+	fs.Var(&o.unsets, "unset", "")
 
 	// Go's flag package stops at the first positional arg; keep parsing so flags may follow the text.
 	var words []string
@@ -126,7 +134,7 @@ func parseArgs(args []string) (options, error) {
 	o.text = strings.Join(words, " ")
 
 	switch {
-	case o.listVoices || o.listModels:
+	case o.listVoices || o.listModels || o.showConf || len(o.sets)+len(o.unsets) > 0:
 		return o, nil
 	case !isModel(o.model):
 		return o, fmt.Errorf("%w: unknown model %q, see --models", errUsage, o.model)
@@ -142,7 +150,7 @@ func parseArgs(args []string) (options, error) {
 		return o, fmt.Errorf("%w: --play cannot be used with -o -", errUsage)
 	}
 	if o.output == "" {
-		o.output = filepath.Join(os.Getenv("CLUMYAP_OUTPUT_DIR"), "clumyap-"+time.Now().Format("20060102-150405")+".mp3")
+		o.output = filepath.Join(setting("output-dir"), "clumyap-"+time.Now().Format("20060102-150405")+".mp3")
 	}
 	if ext := strings.ToLower(filepath.Ext(o.output)); o.output != "-" && ext != ".mp3" && ext != ".wav" {
 		return o, fmt.Errorf("%w: output must end in .mp3 or .wav", errUsage)
@@ -188,6 +196,17 @@ func logf(quiet bool, format string, a ...any) {
 }
 
 func run(o options) error {
+	if len(o.sets)+len(o.unsets) > 0 {
+		if err := updateConfig(o.cfg, o.sets, o.unsets); err != nil {
+			return err
+		}
+		printConfig(o.cfg)
+		return nil
+	}
+	if o.showConf {
+		printConfig(o.cfg)
+		return nil
+	}
 	if o.listVoices {
 		printVoices()
 		return nil
