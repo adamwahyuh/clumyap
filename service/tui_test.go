@@ -3,6 +3,7 @@ package main
 import (
 	"os"
 	"path/filepath"
+	"reflect"
 	"regexp"
 	"strings"
 	"testing"
@@ -115,6 +116,8 @@ func keyPress(name string) tea.KeyPressMsg {
 		return tea.KeyPressMsg{Code: tea.KeyUp}
 	case "ctrl+j":
 		return tea.KeyPressMsg{Code: 'j', Mod: tea.ModCtrl}
+	case "esc":
+		return tea.KeyPressMsg{Code: tea.KeyEscape}
 	}
 	panic("unknown key " + name)
 }
@@ -133,7 +136,8 @@ func TestBannerAndLogo(t *testing.T) {
 		}
 	}
 	o, _ := parseArgs(nil, map[string]string{})
-	b := banner(newTUI(o).o)
+	tm := newTUI(o)
+	b := banner(tm.o, tm.dir)
 	for _, want := range []string{"v" + version(), "kokoro-multi-lang-v1_0", "af_heart", "/help"} {
 		if !strings.Contains(b, want) {
 			t.Errorf("banner is missing %q", want)
@@ -198,5 +202,98 @@ func TestTUIHistory(t *testing.T) {
 	m.Update(tea.KeyPressMsg{Code: ' ', Text: " "})
 	if m.input.Value() != "/model " || len(m.matches()) == 0 {
 		t.Fatalf("after editing, completion should be back: %q, %d matches", m.input.Value(), len(m.matches()))
+	}
+}
+
+func TestDirPicker(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	root := filepath.Join(home, "work")
+	for _, d := range []string{"b-folder", "a-folder", ".hidden"} {
+		os.MkdirAll(filepath.Join(root, d), 0o755)
+	}
+	os.WriteFile(filepath.Join(root, "file.txt"), nil, 0o644)
+	os.Symlink(filepath.Join(root, "a-folder"), filepath.Join(root, "link"))
+
+	got, err := listDirs(root)
+	want := []string{"..", "a-folder/", "b-folder/", "link/", newFolderEntry}
+	if err != nil || !reflect.DeepEqual(got, want) {
+		t.Fatalf("listDirs = %q, %v; want %q", got, err, want)
+	}
+	if got, _ := listDirs("/"); got[0] == ".." {
+		t.Error("the root folder has no ..")
+	}
+
+	for arg, want := range map[string]string{"a-folder": root + "/a-folder", "..": home, "~/work/b-folder": root + "/b-folder", root: root} {
+		if got, err := resolveDir(root, arg); err != nil || got != want {
+			t.Errorf("resolveDir(%q) = %q, %v; want %q", arg, got, err, want)
+		}
+	}
+	for _, bad := range []string{"nope", "file.txt"} {
+		if _, err := resolveDir(root, bad); err == nil {
+			t.Errorf("resolveDir(%q) should fail", bad)
+		}
+	}
+
+	o, _ := parseArgs(nil, map[string]string{})
+	m := newTUI(o)
+	m.dir = root
+	key := func(s string) { m.Update(keyPress(s)) }
+	m.command("/dir")
+	if m.picker == nil {
+		t.Fatal("/dir should open the picker")
+	}
+	key("down") // a-folder/
+	key("enter")
+	if m.dir != root+"/a-folder" || m.picker.entries[0] != ".." {
+		t.Fatalf("enter should open a-folder: %q %q", m.dir, m.picker.entries)
+	}
+	key("enter") // ".." is first
+	if m.dir != root {
+		t.Fatalf(".. should go back up: %q", m.dir)
+	}
+
+	// New folder: last entry, type a name, Enter creates it and moves in.
+	key("up") // wraps to "+ New folder…"
+	key("enter")
+	if !m.picker.naming {
+		t.Fatal("the new-folder entry should ask for a name")
+	}
+	m.setInput("bad/name")
+	key("enter")
+	if m.picker.err == "" || m.dir != root {
+		t.Fatalf("a path as a name must be refused: err %q dir %q", m.picker.err, m.dir)
+	}
+	m.setInput("b-folder")
+	key("enter")
+	if !strings.Contains(m.picker.err, "already exists") {
+		t.Fatalf("an existing name must be refused: %q", m.picker.err)
+	}
+	m.setInput("recordings")
+	key("enter")
+	if st, err := os.Stat(root + "/recordings"); err != nil || !st.IsDir() || m.dir != root+"/recordings" || m.picker.naming {
+		t.Fatalf("new folder not created and opened: %v dir %q", err, m.dir)
+	}
+	key("esc")
+	if m.picker != nil {
+		t.Fatal("esc should close the picker")
+	}
+
+	// /save writes to the chosen folder; /default stores it because /dir was used.
+	m.last, m.eng = make([]float32, 240), &engine{rate: 24000}
+	m.command("/save")
+	if files, _ := filepath.Glob(root + "/recordings/clumyap-*.mp3"); len(files) != 1 {
+		t.Fatalf("/save should write into the chosen folder, found %q", files)
+	}
+	m.command("/default")
+	if cfg, _ := loadConfig(); cfg["output-dir"] != root+"/recordings" {
+		t.Fatalf("/default should store the /dir folder, got %q", cfg["output-dir"])
+	}
+	// Without /dir, /default leaves output-dir alone.
+	m2 := newTUI(o)
+	m2.o.cfg = map[string]string{}
+	m2.command("/default")
+	if _, ok := m2.o.cfg["output-dir"]; ok {
+		t.Fatal("/default must not store the start folder when /dir was not used")
 	}
 }

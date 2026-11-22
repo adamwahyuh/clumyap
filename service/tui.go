@@ -25,6 +25,7 @@ var tuiCommands = []struct{ name, args, desc string }{
 	{"sentence-pause", "N", "extra silence after each sentence, 0-3 (0 = natural flow)"},
 	{"lang", "en-us|en-gb", "accent of the pronunciation"},
 	{"model", "[name]", "switch model (no name: list models)"},
+	{"dir", "[path]", "choose the folder /save writes to (no path: browse, .. goes up)"},
 	{"replay", "", "play the last audio again"},
 	{"stop", "", "stop playback (or Esc)"},
 	{"save", "[file]", "save the last audio (.mp3/.wav, default: output-dir)"},
@@ -54,17 +55,13 @@ var (
 	box    = lipgloss.NewStyle().Border(lipgloss.RoundedBorder()).Padding(0, 1)
 )
 
-// banner is the start-up card: logo, version, the folder files are saved relative to, model and voice.
-func banner(o options) string {
+// banner is the start-up card: logo, version, model, voice and the folder /save writes to.
+func banner(o options, dir string) string {
 	word := "clumyap"
 	colors := lipgloss.Blend1D(len(word), cPurple, cPink, cAmber)
 	var name strings.Builder
 	for i, r := range word {
 		name.WriteString(lipgloss.NewStyle().Foreground(colors[i]).Bold(true).Render(string(r)))
-	}
-	cwd, _ := os.Getwd()
-	if home, err := os.UserHomeDir(); err == nil && strings.HasPrefix(cwd, home) {
-		cwd = "~" + strings.TrimPrefix(cwd, home)
 	}
 	info := strings.Join([]string{
 		name.String() + " " + dim.Render("v"+version()),
@@ -72,7 +69,7 @@ func banner(o options) string {
 		"",
 		dim.Render("model  ") + green.Render(o.model),
 		dim.Render("voice  ") + pink.Render(o.voice),
-		dim.Render("dir    ") + cyan.Render(cwd),
+		dim.Render("dir    ") + cyan.Render(tildePath(dir)),
 	}, "\n")
 	body := lipgloss.JoinHorizontal(lipgloss.Center, strings.Join(logoLines(), "\n"), "   ", info)
 	card := lipgloss.NewStyle().Border(lipgloss.RoundedBorder()).BorderForeground(cPurple).Padding(0, 2).Render(body)
@@ -149,6 +146,10 @@ type tui struct {
 	history []string // what was sent this session, oldest first
 	histIdx int      // entry shown while browsing; len(history) = not browsing
 	draft   string   // the unsent input, restored when browsing back past the newest entry
+
+	dir        string     // where /save writes this session: output-dir, else the folder clumyap started in
+	dirChanged bool       // set by /dir; only then does /default store dir as output-dir
+	picker     *dirPicker // the /dir browser while open
 }
 
 func runTUI(o options) error {
@@ -169,7 +170,7 @@ func runTUI(o options) error {
 func newTUI(o options) *tui {
 	o.voice = voices[voiceID(o.voice)]
 	in := textarea.New()
-	in.Placeholder = "type text to speak, or / for commands"
+	in.Placeholder = inputPlaceholder
 	in.ShowLineNumbers = false
 	in.DynamicHeight, in.MinHeight, in.MaxHeight = true, 1, 10
 	in.SetPromptFunc(2, func(p textarea.PromptInfo) string {
@@ -186,7 +187,11 @@ func newTUI(o options) *tui {
 	in.SetStyles(st)
 	in.Focus()
 	lines, desc := suggestions()
-	return &tui{o: o, input: in, sugs: lines, desc: desc, spin: spinner.New(spinner.WithSpinner(spinner.MiniDot), spinner.WithStyle(pink))}
+	dir := o.cfg["output-dir"]
+	if dir == "" {
+		dir, _ = os.Getwd()
+	}
+	return &tui{o: o, input: in, sugs: lines, desc: desc, dir: dir, spin: spinner.New(spinner.WithSpinner(spinner.MiniDot), spinner.WithStyle(pink))}
 }
 
 // matches are the completions for a one-line "/..." input, case-insensitive by prefix.
@@ -233,7 +238,7 @@ func fail(err error) tea.Cmd                     { return say(red, "✗ "+err.Er
 func done(s string) tea.Cmd                      { return tea.Println(green.Render("✓ ") + s) }
 
 func (m *tui) Init() tea.Cmd {
-	return tea.Batch(tea.Println(banner(m.o)), m.load(m.o.model))
+	return tea.Batch(tea.Println(banner(m.o, m.dir)), m.load(m.o.model))
 }
 
 func (m *tui) load(name string) tea.Cmd {
@@ -256,6 +261,9 @@ func (m *tui) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case tea.WindowSizeMsg:
 		m.input.SetWidth(max(10, msg.Width-4))
 	case tea.KeyPressMsg:
+		if m.picker != nil && msg.String() != "ctrl+c" {
+			return m, m.pickerKey(msg)
+		}
 		matches := m.matches()
 		switch msg.String() {
 		case "ctrl+c":
@@ -438,13 +446,24 @@ func (m *tui) command(line string) tea.Cmd {
 			return fail(errors.New("nothing to replay yet"))
 		}
 		return m.play()
+	case "dir":
+		if arg == "" {
+			m.openPicker()
+			return nil
+		}
+		dir, err := resolveDir(m.dir, arg)
+		if err != nil {
+			return fail(err)
+		}
+		m.setDir(dir)
+		return done(dim.Render("dir → ") + cyan.Render(tildePath(dir)))
 	case "save":
 		if m.last == nil {
 			return fail(errors.New("nothing to save yet"))
 		}
 		path := arg
 		if path == "" {
-			path = filepath.Join(m.o.cfg["output-dir"], "clumyap-"+time.Now().Format("20060102-150405")+".mp3")
+			path = filepath.Join(m.dir, "clumyap-"+time.Now().Format("20060102-150405")+".mp3")
 		}
 		path, err := expandPath(path)
 		if err != nil {
@@ -459,6 +478,9 @@ func (m *tui) command(line string) tea.Cmd {
 		return done(dim.Render("saved ") + cyan.Render(path))
 	case "default":
 		sets := []string{"voice=" + m.o.voice, "speed=" + strconv.FormatFloat(m.o.speed, 'f', -1, 64), "pause=" + strconv.FormatFloat(m.o.pause, 'f', -1, 64), "sentence-pause=" + strconv.FormatFloat(m.o.sentencePause, 'f', -1, 64), "lang=" + m.o.lang, "model=" + m.o.model}
+		if m.dirChanged {
+			sets = append(sets, "output-dir="+m.dir)
+		}
 		if err := updateConfig(m.o.cfg, sets, nil); err != nil {
 			return fail(err)
 		}
@@ -508,14 +530,21 @@ func (m *tui) View() tea.View {
 	if m.busy != "" {
 		border = cAmber
 	}
-	b.WriteString(box.BorderForeground(border).Render(m.input.View()) + "\n")
-	if menu := m.menu(); menu != "" {
+	switch {
+	case m.picker != nil && !m.picker.naming:
+		b.WriteString(m.pickerView() + "\n")
+	case m.picker != nil:
+		b.WriteString(box.BorderForeground(border).Render(m.input.View()) + "\n" + m.pickerView() + "\n")
+	default:
+		b.WriteString(box.BorderForeground(border).Render(m.input.View()) + "\n")
+	}
+	if menu := m.menu(); m.picker == nil && menu != "" {
 		b.WriteString(menu + "\n")
 	}
 	mod, _ := findModel(m.o.model)
 	sep := dim.Render(" · ")
 	b.WriteString(" " + pink.Render("♪ "+m.o.voice) + sep + amber.Render(strconv.FormatFloat(m.o.speed, 'f', -1, 64)+"x") +
-		sep + cyan.Render(m.o.lang) + sep + green.Render(mod.short+" model"))
+		sep + cyan.Render(m.o.lang) + sep + green.Render(mod.short+" model") + sep + dim.Render("📁 "+filepath.Base(m.dir)))
 	if m.player != nil {
 		b.WriteString(sep + pink.Render("▶ playing") + dim.Render(" esc to stop"))
 	}
