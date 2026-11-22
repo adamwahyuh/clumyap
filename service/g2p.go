@@ -16,8 +16,9 @@ import (
 // the official lexicon first, espeak-ng for anything else, converted to Kokoro's symbols.
 type g2p struct {
 	lex     map[string]string
-	user    map[string]string // personal lexicon, lower-case word -> say-as; wins over everything
-	voice   string            // espeak voice
+	user    map[string]string            // personal lexicon, lower-case word -> say-as; wins over everything
+	het     map[string]map[string]string // words said differently by word class ("read", "live", "record")
+	voice   string                       // espeak voice
 	british bool
 }
 
@@ -42,7 +43,11 @@ func newG2P(modelDir, lang string) (*g2p, error) {
 			lex[fields[0]] = strings.Join(fields[1:], "")
 		}
 	}
-	return &g2p{lex: lex, voice: voice, british: lang == "en-gb"}, sc.Err()
+	het := heteronymsUS
+	if lang == "en-gb" {
+		het = heteronymsGB
+	}
+	return &g2p{lex: lex, het: het, voice: voice, british: lang == "en-gb"}, sc.Err()
 }
 
 const punct = `;:,.!?—…"()“”`
@@ -92,6 +97,8 @@ func (g *g2p) sentences(text string) []string {
 		toks = append(toks, t)
 	}
 
+	pastCue := pastCueRe.MatchString(text)
+
 	// Right to left, so each word knows how the next one starts (misaki's future_vowel).
 	future := fNone
 	for i := len(toks) - 1; i >= 0; i-- {
@@ -105,6 +112,10 @@ func (g *g2p) sentences(text string) []string {
 			future = fNone
 		}
 		if _, mine := g.user[strings.ToLower(t.core)]; !mine {
+			if forms := g.het[strings.ToLower(t.core)]; forms != nil && !t.abbrev {
+				prev, next, nextIsPunct := neighbours(toks, i)
+				t.ph = pickForm(forms, wordClass(prev, next, nextIsPunct, pastCue), future)
+			}
 			t.ph = reduced(t.core, t.ph, future, g)
 		}
 		future = startOf(t.ph, future)
@@ -227,34 +238,60 @@ func reduced(word, ph string, next futureKind, g *g2p) string {
 	return ph
 }
 
-// pack joins sentences into strings of at most maxChunk runes; an over-long sentence is split between words.
+// pack joins sentences into strings of at most maxChunk runes. A sentence too long for one model
+// call is cut where a speaker would pause anyway (after , ; : or at a dash), and only between plain
+// words when a single clause is still too long.
 func pack(sentences []string) []string {
+	var pieces []string
+	for _, s := range sentences {
+		pieces = append(pieces, pauses(s)...)
+	}
 	var out []string
 	chunk := ""
-	flush := func() {
-		if chunk != "" {
+	for _, p := range pieces {
+		if chunk != "" && utf8.RuneCountInString(chunk)+1+utf8.RuneCountInString(p) > maxChunk {
 			out = append(out, chunk)
 			chunk = ""
 		}
-	}
-	for _, s := range sentences {
-		if chunk != "" && utf8.RuneCountInString(chunk)+1+utf8.RuneCountInString(s) <= maxChunk {
-			chunk += " " + s
-			continue
+		if chunk != "" {
+			chunk += " "
 		}
-		flush()
-		// A single over-long sentence is split between words.
-		for _, w := range strings.Fields(s) {
-			if chunk != "" && utf8.RuneCountInString(chunk)+1+utf8.RuneCountInString(w) > maxChunk {
-				flush()
-			}
-			if chunk != "" {
-				chunk += " "
-			}
-			chunk += w
+		chunk += p
+	}
+	if chunk != "" {
+		out = append(out, chunk)
+	}
+	return out
+}
+
+// pauses splits an over-long sentence into clauses, and any clause still over maxChunk into words.
+func pauses(s string) []string {
+	if utf8.RuneCountInString(s) <= maxChunk {
+		return []string{s}
+	}
+	var clauses []string
+	cur := ""
+	for _, w := range strings.Fields(s) {
+		if cur != "" {
+			cur += " "
+		}
+		cur += w
+		if w == "—" || strings.ContainsAny(w[len(w)-1:], ",;:") {
+			clauses = append(clauses, cur)
+			cur = ""
 		}
 	}
-	flush()
+	if cur != "" {
+		clauses = append(clauses, cur)
+	}
+	var out []string
+	for _, c := range clauses {
+		if utf8.RuneCountInString(c) <= maxChunk {
+			out = append(out, c)
+		} else {
+			out = append(out, strings.Fields(c)...)
+		}
+	}
 	return out
 }
 
@@ -355,4 +392,84 @@ func keepPhonemes(s string) string {
 		}
 		return r
 	}, s)
+}
+
+// Heteronyms: Kokoro's pipeline picks "read" (reed/red) or "live" (liv/laiv) with a part-of-speech
+// tagger. We have none, so the word before decides, which covers the common patterns.
+var (
+	pastCueRe   = regexp.MustCompile(`(?i)\b(yesterday|ago|last|earlier)\b`)
+	toVerb      = setOf("to", "will", "would", "can", "could", "shall", "should", "may", "might", "must", "do", "does", "did", "don't", "doesn't", "didn't", "won't", "can't", "couldn't", "wouldn't", "shouldn't", "let's", "please")
+	toPerfect   = setOf("have", "has", "had", "having", "i've", "you've", "we've", "they've")
+	toBe        = setOf("is", "are", "was", "were", "be", "been", "being", "am", "it's", "that's")
+	thirdPerson = setOf("he", "she", "it")
+	subjects    = setOf("i", "you", "we", "they")
+	determiners = setOf("the", "a", "an", "this", "that", "these", "those", "my", "your", "his", "her", "its", "our", "their", "every", "each", "no")
+	afterNoun   = setOf("of", "is", "was", "are", "were", "in", "on", "at", "for", "with", "from", "to")
+	objects     = setOf("it", "this", "that", "the", "a", "an", "your", "my", "them", "me", "us", "his", "her", "our", "their")
+)
+
+func setOf(words ...string) map[string]bool {
+	m := make(map[string]bool, len(words))
+	for _, w := range words {
+		m[w] = true
+	}
+	return m
+}
+
+// neighbours returns the words around toks[i] within its clause ("" across punctuation or the text's edge).
+func neighbours(toks []token, i int) (prev, next string, nextIsPunct bool) {
+	if i > 0 && !strings.ContainsAny(toks[i-1].trail+toks[i].lead, nonQuotePunct) {
+		prev = strings.ToLower(toks[i-1].core)
+	}
+	if i+1 >= len(toks) || strings.ContainsAny(toks[i].trail+toks[i+1].lead, nonQuotePunct) {
+		return prev, "", true
+	}
+	return prev, strings.ToLower(toks[i+1].core), false
+}
+
+// wordClass guesses misaki's tag for a heteronym from the words around it.
+func wordClass(prev, next string, nextIsPunct, pastCue bool) string {
+	switch {
+	case toVerb[prev]:
+		return "VB" // "want to record", "don't object"
+	case toPerfect[prev]:
+		return "VBN" // "have read"
+	case toBe[prev]:
+		return "BE" // "was read" (past participle) or "is close" (adjective)
+	case thirdPerson[prev]:
+		return "VBD" // "he read": the present would be "reads"
+	case subjects[prev]:
+		if pastCue {
+			return "VBD" // "I read it yesterday"
+		}
+		return "VB" // "we live here"
+	case determiners[prev]:
+		if nextIsPunct || afterNoun[next] {
+			return "NN" // "the use of", "the content is"
+		}
+		return "DEFAULT" // "the close friend", "a minute ago": usually describing what follows
+	case prev == "" && objects[next]:
+		return "VB" // a command: "Record it", "Close the door"
+	}
+	return "DEFAULT"
+}
+
+func pickForm(forms map[string]string, class string, next futureKind) string {
+	if p := forms["None"]; next == fNone && p != "" {
+		return p // misaki has a few words said differently before a pause
+	}
+	if class == "BE" {
+		if p := forms["VBN"]; p != "" {
+			return p
+		}
+		return forms["DEFAULT"]
+	}
+	if p := forms[class]; p != "" {
+		return p
+	}
+	parent := map[string]string{"VB": "VERB", "VBD": "VERB", "VBN": "VERB", "VBP": "VERB", "NN": "NOUN"}[class]
+	if p := forms[parent]; p != "" {
+		return p
+	}
+	return forms["DEFAULT"]
 }

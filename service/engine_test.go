@@ -192,3 +192,59 @@ func TestNaturalReading(t *testing.T) {
 		}
 	}
 }
+
+func TestHeteronyms(t *testing.T) {
+	home, _ := os.UserHomeDir()
+	dir := filepath.Join(home, ".cache/clumyap", models[0].name)
+	if _, err := os.Stat(filepath.Join(dir, "lexicon-us-en.txt")); err != nil {
+		t.Skip("model not downloaded")
+	}
+	pp.Initialize(filepath.Join(dir, "espeak-ng-data"))
+	g, err := newG2P(dir, "en-us")
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, c := range []struct{ text, want string }{
+		{"I like to read books.", "ɹˈid"},
+		{"I have read that book.", "ɹˈɛd"},
+		{"It was read aloud.", "ɹˈɛd"},
+		{"She read it all.", "ɹˈɛd"},
+		{"I read it yesterday.", "ɹˈɛd"},
+		{"We live here.", "lˈɪv"},
+		{"The show is live.", "lˈIv"},
+		{"A live show.", "lˈIv"},
+		{"I want to record a song.", "ɹəkˈɔɹd"},
+		{"That record is old.", "ɹˈɛkəɹd"},
+		{"Record it now.", "ɹəkˈɔɹd"},
+		{"Close the door.", "klˈOz"},
+		{"She is a close friend.", "klˈOs"},
+		{"Wait a minute.", "mˈɪnət"},
+		{"I object to that.", "əbʤˈɛkt"},
+		{"The object is red.", "ˈɑbʤəkt"},
+		{"The use of it.", "jˈus"},
+	} {
+		if got := strings.Join(g.sentences(c.text), " "); !strings.Contains(got, c.want) {
+			t.Errorf("%q: want %q in %q", c.text, c.want, got)
+		}
+	}
+}
+
+func TestPausesCutAtCommas(t *testing.T) {
+	clause := strings.Repeat("wˈɜɹd ", 30) // ~180 runes
+	long := strings.TrimSpace(clause) + ", " + strings.TrimSpace(clause) + ", " + strings.TrimSpace(clause) + "."
+	chunks := pack([]string{long})
+	if len(chunks) < 2 {
+		t.Fatalf("want the sentence split, got %d chunk", len(chunks))
+	}
+	for _, c := range chunks[:len(chunks)-1] {
+		if !strings.HasSuffix(c, ",") {
+			t.Errorf("a cut should fall after a comma, chunk ends %q", c[max(0, len(c)-12):])
+		}
+		if utf8.RuneCountInString(c) > maxChunk {
+			t.Errorf("chunk over the limit: %d", utf8.RuneCountInString(c))
+		}
+	}
+	if got := strings.Join(chunks, " "); got != long {
+		t.Error("splitting must not lose or change text")
+	}
+}

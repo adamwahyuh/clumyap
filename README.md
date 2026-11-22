@@ -60,7 +60,7 @@ Made by Adam Wahyu Hariyadi. `/info` inside `clumyap start` shows the same list.
 | Kokoro-82M | hexgrad | Apache-2.0 | the voices |
 | sherpa-onnx | k2-fsa | Apache-2.0 | runs the voice model |
 | ONNX Runtime | Microsoft | MIT | neural network engine |
-| misaki | hexgrad | Apache-2.0 | espeak-to-Kokoro sound rules |
+| misaki | hexgrad | Apache-2.0 | sound rules and heteronym list |
 | espeak-ng | espeak-ng team | GPL-3.0 | words missing from Kokoro's lexicon |
 | piper-phonemize | rhasspy | MIT | connects espeak-ng |
 | shine-mp3 | braheezy | LGPL-2.0 | MP3 encoder |
